@@ -1,272 +1,255 @@
-local MarketplaceService = game:GetService("MarketplaceService")
+-- Word Search Revamp server entrypoint.
+-- All progression-changing actions terminate in DataService through RoundService.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local BadgeService = game:GetService("BadgeService")
+local RunService = game:GetService("RunService")
+
+local function requireChild(parent, name)
+	local child = parent:WaitForChild(name, 10)
+	assert(child, string.format("[WordSearch] Missing required instance %s.%s", parent:GetFullName(), name))
+	return child
+end
 
 local serverFolder = script.Parent.Parent
-local servicesFolder = serverFolder:WaitForChild("services")
-local gameplayServicesFolder = servicesFolder:WaitForChild("gameplay")
-local metaServicesFolder = servicesFolder:WaitForChild("meta")
-local opsServicesFolder = servicesFolder:WaitForChild("ops")
-local dataFolder = serverFolder:WaitForChild("data")
-local utilFolder = serverFolder:WaitForChild("utils")
+local shared = requireChild(ReplicatedStorage, "shared")
+local configFolder = requireChild(shared, "config")
+local dataFolder = requireChild(serverFolder, "data")
+local servicesFolder = requireChild(serverFolder, "services")
+local gameplayFolder = requireChild(servicesFolder, "gameplay")
+local metaFolder = requireChild(servicesFolder, "meta")
+local opsFolder = requireChild(servicesFolder, "ops")
+local utilsFolder = requireChild(serverFolder, "utils")
 
-local AdminCommandService = require(opsServicesFolder:WaitForChild("AdminCommandService"))
-local AnalyticsService = require(opsServicesFolder:WaitForChild("AnalyticsService"))
-local AntiAfkService = require(opsServicesFolder:WaitForChild("AntiAfkService"))
-local DayNightCycleService = require(opsServicesFolder:WaitForChild("DayNightCycleService"))
-local LeaderboardService = require(metaServicesFolder:WaitForChild("LeaderboardService"))
-local MetaService = require(metaServicesFolder:WaitForChild("MetaService"))
-local PlayerDataStore = require(dataFolder:WaitForChild("PlayerDataStore"))
-local ProgressionService = require(gameplayServicesFolder:WaitForChild("ProgressionService"))
-local InstanceUtils = require(utilFolder:WaitForChild("InstanceUtils"))
-local SharedConfig = require(utilFolder:WaitForChild("SharedConfig"))
+local GameConfig = require(requireChild(configFolder, "GameConfig"))
+local RemoteConfig = require(requireChild(configFolder, "RemoteConfig"))
+local DataService = require(requireChild(dataFolder, "DataService"))
+local DailyPuzzleService = require(requireChild(metaFolder, "DailyPuzzleService"))
+local PuzzleService = require(requireChild(gameplayFolder, "PuzzleService"))
+local RewardService = require(requireChild(gameplayFolder, "RewardService"))
+local RoundService = require(requireChild(gameplayFolder, "RoundService"))
+local RateLimiter = require(requireChild(opsFolder, "RateLimiter"))
+local RemoteValidator = require(requireChild(utilsFolder, "RemoteValidator"))
 
-local DEFAULT_REMOTE_CONFIG = {
-	FolderName = "WordSearchBackendRemotes",
-	GetBootstrap = "GetBootstrap",
-	TrackAction = "TrackAction",
-	StateUpdated = "StateUpdated",
-	UseHint = "UseHint",
-	UseTimedProduct = "UseTimedProduct",
-}
-
-local RemoteConfig = SharedConfig.Resolve("RemoteConfig", DEFAULT_REMOTE_CONFIG)
-local WELCOME_BADGE_ID = 819292117677808
-local VALID_TRACK_ACTIONS = {
-	WordFound = true,
-	BoardStateUpdated = true,
-	BoardStateCleared = true,
-	BoardCleared = true,
-	BoardLost = true,
-	HintUsed = true,
-	ClientFunnel = true,
-}
-local ACTION_THROTTLES = {
-	WordFound = 0.05,
-	BoardStateUpdated = 0.1,
-	BoardStateCleared = 0.05,
-	BoardCleared = 0.1,
-	BoardLost = 0.1,
-	HintUsed = 0.1,
-	ClientFunnel = 0.25,
-}
-local actionRateState = {}
-
-local getOrCreate = InstanceUtils.GetOrCreate
-
-local function awardWelcomeBadge(player)
-	if not (player and player.Parent) then
-		return
+local function getOrCreate(parent, className, name)
+	local existing = parent:FindFirstChild(name)
+	if existing and existing.ClassName ~= className then
+		existing:Destroy()
+		existing = nil
+	end
+	if existing then
+		return existing
 	end
 
-	task.spawn(function()
-		local hasBadge = false
-		local hasBadgeOk, hasBadgeResult = pcall(function()
-			return BadgeService:UserHasBadgeAsync(player.UserId, WELCOME_BADGE_ID)
-		end)
-		if hasBadgeOk then
-			hasBadge = hasBadgeResult == true
+	local instance = Instance.new(className)
+	instance.Name = name
+	instance.Parent = parent
+	return instance
+end
+
+local remoteFolder = getOrCreate(ReplicatedStorage, "Folder", RemoteConfig.FolderName)
+local functions = {}
+for key, name in pairs(RemoteConfig.Functions) do
+	functions[key] = getOrCreate(remoteFolder, "RemoteFunction", name)
+end
+local events = {}
+for key, name in pairs(RemoteConfig.Events) do
+	events[key] = getOrCreate(remoteFolder, "RemoteEvent", name)
+end
+
+local limiter = RateLimiter.new(8, 4)
+
+RoundService.Init({
+	DataService = DataService,
+	PuzzleService = PuzzleService,
+	RewardService = RewardService,
+	DailyPuzzleService = DailyPuzzleService,
+})
+
+local function fail(code, message)
+	return { success = false, code = code, message = message }
+end
+
+local function safeInvoke(label, callback)
+	local packed = table.pack(xpcall(callback, debug.traceback))
+	if not packed[1] then
+		warn(string.format("[WordSearch/%s] %s", label, tostring(packed[2])))
+		return fail("server_error", "Something went wrong. Please try again.")
+	end
+	return table.unpack(packed, 2, packed.n)
+end
+
+local function sendSnapshot(player, snapshot)
+	if player.Parent and type(snapshot) == "table" then
+		events.StateUpdated:FireClient(player, snapshot)
+	end
+end
+
+local function ensureProfile(player)
+	if DataService.IsReady(player) then
+		return true
+	end
+	local loaded = DataService.LoadPlayer(player)
+	return loaded == true and DataService.IsReady(player)
+end
+
+functions.GetBootstrap.OnServerInvoke = function(player)
+	return safeInvoke("GetBootstrap", function()
+		if not limiter:Allow(player, "GetBootstrap", 1, 3, 0.2) then
+			return fail("rate_limited", "Please wait before retrying.")
+		end
+		if not ensureProfile(player) then
+			return fail("data_unavailable", "Your data could not be loaded safely. Retry in a moment.")
 		end
 
-		if hasBadge then
+		return {
+			success = true,
+			snapshot = DataService.GetSnapshot(player),
+			catalog = PuzzleService.GetCatalogSnapshot(),
+			daily = DailyPuzzleService.GetPublicIdentity(),
+			contentRevision = GameConfig.ContentRevision,
+		}
+	end)
+end
+
+functions.StartRound.OnServerInvoke = function(player, rawRequest)
+	return safeInvoke("StartRound", function()
+		if not limiter:Allow(player, "StartRound", 1, 2, 0.5) then
+			return fail("rate_limited", "Please wait before starting another puzzle.")
+		end
+		local request = RemoteValidator.StartRequest(rawRequest)
+		if not request then
+			return fail("invalid_request", "Invalid puzzle request.")
+		end
+		return RoundService.Start(player, request)
+	end)
+end
+
+functions.SubmitSelection.OnServerInvoke = function(player, rawRequest)
+	return safeInvoke("SubmitSelection", function()
+		if not limiter:Allow(player, "SubmitSelection", 1, 12, 12) then
+			return fail("rate_limited", "Selection submitted too quickly.")
+		end
+		local request = RemoteValidator.Selection(
+			rawRequest,
+			GameConfig.Gameplay.MaxGridHeight,
+			GameConfig.Gameplay.MaxGridWidth
+		)
+		if not request then
+			return fail("invalid_request", "Invalid selection.")
+		end
+		local result = RoundService.SubmitSelection(player, request)
+		if result.completed and result.snapshot then
+			sendSnapshot(player, result.snapshot)
+		end
+		return result
+	end)
+end
+
+functions.RequestHint.OnServerInvoke = function(player, rawRequest)
+	return safeInvoke("RequestHint", function()
+		if not limiter:Allow(player, "RequestHint", 1, 3, 1) then
+			return fail("rate_limited", "Please wait before using another hint.")
+		end
+		local request = RemoteValidator.HintRequest(rawRequest)
+		if not request then
+			return fail("invalid_request", "Invalid hint request.")
+		end
+		local result = RoundService.RequestHint(player, request)
+		if result.snapshot then
+			sendSnapshot(player, result.snapshot)
+		end
+		return result
+	end)
+end
+
+functions.SetPaused.OnServerInvoke = function(player, rawRequest)
+	return safeInvoke("SetPaused", function()
+		if not limiter:Allow(player, "SetPaused", 1, 3, 1) then
+			return fail("rate_limited", "Pause changed too quickly.")
+		end
+		local request = RemoteValidator.PauseRequest(rawRequest)
+		if not request then
+			return fail("invalid_request", "Invalid pause request.")
+		end
+		return RoundService.SetPaused(player, request)
+	end)
+end
+
+functions.UpdateSettings.OnServerInvoke = function(player, rawRequest)
+	return safeInvoke("UpdateSettings", function()
+		if not limiter:Allow(player, "UpdateSettings", 1, 5, 2) then
+			return fail("rate_limited", "Settings changed too quickly.")
+		end
+		local request = RemoteValidator.SettingRequest(rawRequest)
+		if not request then
+			return fail("invalid_request", "That setting could not be changed.")
+		end
+		if not DataService.IsReady(player) then
+			return fail("data_unavailable", "Your progress is not ready yet.")
+		end
+		local success, snapshotOrMessage = DataService.UpdateSetting(player, request.name, request.value)
+		if not success then
+			return fail("update_failed", tostring(snapshotOrMessage or "Setting update failed."))
+		end
+		local snapshot = type(snapshotOrMessage) == "table" and snapshotOrMessage or DataService.GetSnapshot(player)
+		sendSnapshot(player, snapshot)
+		return { success = true, snapshot = snapshot }
+	end)
+end
+
+functions.CompleteTutorial.OnServerInvoke = function(player)
+	return safeInvoke("CompleteTutorial", function()
+		if not limiter:Allow(player, "CompleteTutorial", 1, 2, 0.25) then
+			return fail("rate_limited", "Please wait and try again.")
+		end
+		if not DataService.IsReady(player) then
+			return fail("data_unavailable", "Your progress is not ready yet.")
+		end
+		local success, snapshotOrMessage = DataService.CompleteTutorial(player)
+		if not success then
+			return fail("update_failed", tostring(snapshotOrMessage or "Tutorial progress was not saved."))
+		end
+		local snapshot = type(snapshotOrMessage) == "table" and snapshotOrMessage or DataService.GetSnapshot(player)
+		sendSnapshot(player, snapshot)
+		return { success = true, snapshot = snapshot }
+	end)
+end
+
+events.AbandonRound.OnServerEvent:Connect(function(player, rawRequest)
+	if not limiter:Allow(player, "AbandonRound", 1, 3, 1) then
+		return
+	end
+	local request = RemoteValidator.RoundRequest(rawRequest)
+	if request then
+		RoundService.Abandon(player, request.roundId)
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	limiter:ClearPlayer(player)
+	RoundService.ClearPlayer(player)
+end)
+
+DataService.Init()
+
+if RunService:IsStudio() then
+	task.defer(function()
+		local testsFolder = serverFolder:FindFirstChild("tests")
+		local testModule = testsFolder and testsFolder:FindFirstChild("PuzzleEngineTests")
+		if not testModule then
+			warn("[WordSearch] Puzzle self-tests were not found; continuing in Studio.")
 			return
 		end
 
-		pcall(function()
-			BadgeService:AwardBadge(player.UserId, WELCOME_BADGE_ID)
+		local ok, result = pcall(function()
+			return require(testModule).Run()
 		end)
-	end)
-end
-
-local remotesFolder = getOrCreate(ReplicatedStorage, "Folder", RemoteConfig.FolderName)
-local getBootstrapRemote = getOrCreate(remotesFolder, "RemoteFunction", RemoteConfig.GetBootstrap)
-local trackActionRemote = getOrCreate(remotesFolder, "RemoteEvent", RemoteConfig.TrackAction)
-local stateUpdatedRemote = getOrCreate(remotesFolder, "RemoteEvent", RemoteConfig.StateUpdated)
-local useHintRemote = getOrCreate(remotesFolder, "RemoteFunction", RemoteConfig.UseHint)
-local useTimedProductRemote = getOrCreate(remotesFolder, "RemoteFunction", RemoteConfig.UseTimedProduct)
-local sharedRemotesFolder = getOrCreate(ReplicatedStorage, "Folder", "Remotes")
-local sharedEventsFolder = getOrCreate(sharedRemotesFolder, "Folder", "Events")
-local sharedFunctionsFolder = getOrCreate(sharedRemotesFolder, "Folder", "Functions")
-
-local staleGetQuestStateRemote = sharedFunctionsFolder:FindFirstChild("GetQuestState")
-if staleGetQuestStateRemote then
-	staleGetQuestStateRemote:Destroy()
-end
-local staleClaimQuestRemote = sharedFunctionsFolder:FindFirstChild("ClaimQuest")
-if staleClaimQuestRemote then
-	staleClaimQuestRemote:Destroy()
-end
-
-local purchaseHintsRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", "PurchaseHintsWithCoins")
-local getDailyRewardStateRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", "GetDailyRewardState")
-local claimDailyRewardRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", "ClaimDailyReward")
-local checkHintsRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", "CheckHints")
-local staleClaimTimedRewardRemote = sharedFunctionsFolder:FindFirstChild("ClaimTimedReward")
-if staleClaimTimedRewardRemote then
-	staleClaimTimedRewardRemote:Destroy()
-end
-
-local purchaseSuccessEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "PurchaseSuccess")
-local claimGiftEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "ClaimGift")
-local playerJoinedGroupEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "PlayerJoinedGroup")
-local groupHintAwardedEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "GroupHintAwarded")
-local updateSettingEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "UpdateSetting")
-local rejoinRemote = getOrCreate(sharedEventsFolder, "RemoteEvent", "RejoinRemote")
-local adminMessageEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "AdminMessage")
-local adminBoardResetEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", "AdminBoardReset")
-
-AntiAfkService.Init(rejoinRemote)
-DayNightCycleService.Init()
-AdminCommandService.Init({
-	Players = Players,
-	AnalyticsService = AnalyticsService,
-	LeaderboardService = LeaderboardService,
-	MetaService = MetaService,
-	PlayerDataStore = PlayerDataStore,
-	StateUpdatedRemote = stateUpdatedRemote,
-	AdminMessageEvent = adminMessageEvent,
-	AdminBoardResetEvent = adminBoardResetEvent,
-})
-
-getBootstrapRemote.OnServerInvoke = function(player)
-	return PlayerDataStore.GetSnapshot(player)
-end
-
-trackActionRemote.OnServerEvent:Connect(function(player, actionName, payload)
-	if type(actionName) ~= "string" or VALID_TRACK_ACTIONS[actionName] ~= true then
-		return
-	end
-
-	local now = os.clock()
-	local playerRates = actionRateState[player.UserId]
-	if not playerRates then
-		playerRates = {}
-		actionRateState[player.UserId] = playerRates
-	end
-	local throttleSeconds = ACTION_THROTTLES[actionName] or 0
-	local lastAt = tonumber(playerRates[actionName]) or 0
-	if throttleSeconds > 0 and (now - lastAt) < throttleSeconds then
-		return
-	end
-	playerRates[actionName] = now
-
-	local snapshot = ProgressionService.RecordAction(player, actionName, payload)
-	if snapshot then
-		stateUpdatedRemote:FireClient(player, snapshot)
-	end
-end)
-
-useHintRemote.OnServerInvoke = function(player, payload)
-	return ProgressionService.UseHint(player, payload)
-end
-
-useTimedProductRemote.OnServerInvoke = function(player, payload)
-	return ProgressionService.UseTimedProduct(player, payload)
-end
-
-purchaseHintsRemote.OnServerInvoke = function(player, amount)
-	return MetaService.PurchaseHintsWithStars(player, amount)
-end
-
-getDailyRewardStateRemote.OnServerInvoke = function(player)
-	return MetaService.GetDailyRewardState(player)
-end
-
-claimDailyRewardRemote.OnServerInvoke = function(player)
-	return MetaService.ClaimDailyReward(player)
-end
-
-checkHintsRemote.OnServerInvoke = function(player)
-	return MetaService.GetAvailableHints(player)
-end
-
-claimGiftEvent.OnServerEvent:Connect(function(player)
-	local result = MetaService.ClaimGiftReward(player)
-	if not result then
-		return
-	end
-
-	if result.snapshot then
-		stateUpdatedRemote:FireClient(player, result.snapshot)
-	end
-
-	claimGiftEvent:FireClient(player, result)
-end)
-
-updateSettingEvent.OnServerEvent:Connect(function(player, settingName, value)
-	if MetaService.UpdateSetting(player, settingName, value) then
-		stateUpdatedRemote:FireClient(player, PlayerDataStore.GetSnapshot(player))
-	end
-end)
-
-playerJoinedGroupEvent.OnServerEvent:Connect(function(player)
-	local result = MetaService.ClaimGroupReward(player)
-	if not result then
-		return
-	end
-
-	if result.snapshot then
-		stateUpdatedRemote:FireClient(player, result.snapshot)
-	end
-
-	groupHintAwardedEvent:FireClient(player, {
-		success = result.success == true,
-		rewardHints = result.rewardHints or 0,
-		rewardXp = result.rewardXp or 0,
-		alreadyClaimed = result.alreadyClaimed == true,
-		message = result.message,
-	})
-end)
-
-local function onPlayerAdded(player)
-	AnalyticsService.InitPlayer(player)
-	ProgressionService.ClearPlayer(player)
-	PlayerDataStore.LoadPlayer(player)
-	MetaService.OnPlayerLoaded(player)
-	awardWelcomeBadge(player)
-	task.defer(function()
-		if player.Parent then
-			local snapshot = PlayerDataStore.GetSnapshot(player)
-			LeaderboardService.MarkSnapshotDirty(player, snapshot)
-			stateUpdatedRemote:FireClient(player, snapshot)
+		if not ok then
+			warn("[WordSearch] Puzzle self-tests failed: " .. tostring(result))
+		elseif type(result) ~= "table" or result.passed ~= result.total then
+			warn("[WordSearch] Puzzle self-tests returned an incomplete result.")
+		else
+			print(string.format("[WordSearch] Puzzle self-tests passed (%d/%d).", result.passed, result.total))
 		end
 	end)
 end
-
-Players.PlayerAdded:Connect(onPlayerAdded)
-
-for _, player in ipairs(Players:GetPlayers()) do
-	task.spawn(onPlayerAdded, player)
-end
-
-Players.PlayerRemoving:Connect(function(player)
-	actionRateState[player.UserId] = nil
-	AnalyticsService.PlayerLeft(player)
-	LeaderboardService.FlushPlayer(player)
-	ProgressionService.ClearPlayer(player)
-	PlayerDataStore.ReleasePlayer(player)
-end)
-
-MarketplaceService.ProcessReceipt = function(receiptInfo)
-	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
-	if not player then
-		return Enum.ProductPurchaseDecision.NotProcessedYet
-	end
-
-	local result = MetaService.GrantProductPurchase(player, receiptInfo.ProductId, receiptInfo.PurchaseId)
-	if not result then
-		return Enum.ProductPurchaseDecision.NotProcessedYet
-	end
-
-	if result.snapshot and result.alreadyProcessed ~= true then
-		stateUpdatedRemote:FireClient(player, result.snapshot)
-	end
-
-	if result.alreadyProcessed ~= true then
-		purchaseSuccessEvent:FireClient(player, result.kind, result.amount)
-	end
-	return Enum.ProductPurchaseDecision.PurchaseGranted
-end
-
-LeaderboardService.Initialize()
