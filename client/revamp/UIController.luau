@@ -235,13 +235,17 @@ function UIController.new(playerGui, options)
 	self._cells = {}
 	self._gridWidth = 0
 	self._gridHeight = 0
-	self._previewLookup = {}
+	self._boardCellSize = 0
+	self._boardCellGap = 0
 	self._recentSelection = {}
 	self._trailSelection = {}
 	self._hoveredKey = nil
+	self._hoveredCell = nil
 	self._cellStates = {}
 	self._wordRows = {}
 	self._foundWords = {}
+	self._expandedChapterId = nil
+	self._renderedStatus = {}
 	self._resultToken = 0
 	self._tutorialToken = 0
 	self._toastSerial = 0
@@ -1107,6 +1111,16 @@ function UIController:_buildModals()
 	self:_corner(demo, Theme.Radii.Large)
 	self:_stroke(demo, "Border", 1)
 	self:_label(demo, "Prompt", "Find WORD", "Small", "Gold", { Position = UDim2.new(0, 16, 0, 20), Size = UDim2.new(1, -32, 0, 24), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 103 })
+	local demoTrail = self:_frame(demo, "SelectionTrail", "Accent", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0.5, -148, 0.62, 0),
+		Size = UDim2.fromOffset(32, 32),
+		BackgroundTransparency = 0.18,
+		Visible = false,
+		ZIndex = 104,
+	})
+	self:_corner(demoTrail, Theme.Radii.Pill)
+	self._refs.tutorialTrail = demoTrail
 	local demoCells = self:_frame(demo, "Cells", nil, { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.62), Size = UDim2.fromOffset(304, 58), ZIndex = 103 })
 	create("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, Padding = UDim.new(0, 4), Parent = demoCells })
 	self._refs.tutorialCells = {}
@@ -1114,7 +1128,7 @@ function UIController:_buildModals()
 		local cell = self:_frame(demoCells, "Cell" .. tostring(index), "BoardCell", { Size = UDim2.fromOffset(56, 56), LayoutOrder = index, ZIndex = 103 })
 		self:_corner(cell, Theme.Radii.Small)
 		self:_stroke(cell, "Border", 1)
-		self:_label(cell, "Letter", letter, "Heading", "Text", { Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 104 })
+		self:_label(cell, "Letter", letter, "Heading", "Text", { Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 105 })
 		table.insert(self._refs.tutorialCells, cell)
 	end
 	self._refs.tutorialStep = self:_label(tutorial.card, "Step", "1. Press and hold the first letter.", "Body", "Text", {
@@ -1304,6 +1318,7 @@ function UIController:_applyResponsiveLayout()
 	self:_updateTextSizes(self._textRoles)
 	self:_updateTextSizes(self._levelTextRoles)
 	self:_updateTextSizes(self._cellTextRoles)
+	self._renderedStatus.timerToken = nil
 
 	for _, pageName in ipairs({ "Menu", "Levels", "Daily", "Game" }) do
 		local page = self._screens[pageName]
@@ -1660,6 +1675,37 @@ end
 function UIController:ShowLevels(data)
 	data = data or {}
 	self._chapters = type(data.chapters) == "table" and data.chapters or self._chapters or DEFAULT_CHAPTERS
+	local expandedStillExists = false
+	for _, chapter in ipairs(self._chapters) do
+		if tostring(chapter.id) == tostring(self._expandedChapterId) and chapter.unlocked ~= false then
+			expandedStillExists = true
+			break
+		end
+	end
+	if not expandedStillExists then
+		self._expandedChapterId = nil
+		for _, chapter in ipairs(self._chapters) do
+			if chapter.unlocked ~= false then
+				for _, level in ipairs(type(chapter.levels) == "table" and chapter.levels or {}) do
+					if level.state == "active" then
+						self._expandedChapterId = chapter.id
+						break
+					end
+				end
+			end
+			if self._expandedChapterId then
+				break
+			end
+		end
+		if not self._expandedChapterId then
+			for _, chapter in ipairs(self._chapters) do
+				if chapter.unlocked ~= false then
+					self._expandedChapterId = chapter.id
+					break
+				end
+			end
+		end
+	end
 	self._refs.levelsStars.Text = "★ " .. tostring(math.max(0, math.floor(tonumber(data.totalStars) or 0)))
 	self:_setPage("Levels")
 	self:_renderLevels(self._chapters)
@@ -1710,6 +1756,7 @@ function UIController:_setButtonToken(button, token)
 end
 
 function UIController:_renderLevels(chapters)
+	local previousCanvasPosition = self._refs.levelsScroll and self._refs.levelsScroll.CanvasPosition or Vector2.zero
 	disconnectAll(self._levelConnections)
 	clearInstances(self._levelInstances)
 	table.clear(self._levelStyles)
@@ -1719,10 +1766,14 @@ function UIController:_renderLevels(chapters)
 	end
 
 	local columns = math.max(2, self._layout.levelColumns)
+	local chapterNavigation = {}
+	self._chapterToggles = {}
 	for chapterIndex, chapter in ipairs(chapters or DEFAULT_CHAPTERS) do
 		local levels = type(chapter.levels) == "table" and chapter.levels or {}
-		local rows = math.max(1, math.ceil(math.max(1, #levels) / columns))
-		local cardHeight = 92 + (rows * 62)
+		local chapterId = tostring(chapter.id or chapterIndex)
+		local expanded = chapter.unlocked ~= false and tostring(self._expandedChapterId) == chapterId
+		local rows = expanded and math.max(1, math.ceil(math.max(1, #levels) / columns)) or 0
+		local cardHeight = expanded and (104 + (rows * 62)) or 92
 		local card = self:_frame(self._refs.levelsScroll, "Chapter_" .. tostring(chapter.id or chapterIndex), "Panel", {
 			Size = UDim2.new(1, -8, 0, cardHeight),
 			LayoutOrder = chapterIndex,
@@ -1758,55 +1809,90 @@ function UIController:_renderLevels(chapters)
 		self:_label(card, "State", chapterState, "Small", chapter.unlocked == false and "TextDisabled" or "Gold", {
 			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 18), Size = UDim2.new(0.3, 0, 0, 24), TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 5,
 		}, self._levelStyles, self._levelTextRoles)
-
-		local levelRoot = self:_frame(card, "Levels", nil, {
-			Position = UDim2.new(0, 16, 0, 78), Size = UDim2.new(1, -32, 1, -90), ZIndex = 5,
-		}, self._levelStyles)
-		create("UIGridLayout", {
-			CellPadding = UDim2.fromOffset(8, 8),
-			CellSize = UDim2.new(1 / columns, -8, 0, 54),
-			FillDirectionMaxCells = columns,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Parent = levelRoot,
-		})
-
-		local levelButtons = {}
-		for levelIndex, level in ipairs(levels) do
-			local stateName = tostring(level.state or (level.locked and "locked" or level.completed and "completed" or "available"))
-			local locked = chapter.unlocked == false or stateName == "locked"
-			local completed = stateName == "completed" or math.max(0, tonumber(level.stars) or 0) > 0
-			local active = stateName == "active"
-			local token = locked and "BackgroundRaised" or completed and "SuccessDark" or active and "Accent" or "PanelRaised"
-			local number = level.number or levelIndex
-			local stars = math.clamp(math.floor(tonumber(level.stars) or 0), 0, 3)
-			local label = locked and ("LOCKED  •  " .. tostring(number))
-				or completed and ("✓  " .. tostring(number) .. "   " .. string.rep("★", stars))
-				or active and ("NOW  •  " .. tostring(number))
-				or ("PLAY  •  " .. tostring(number))
-			local button = self:_button(levelRoot, "Level_" .. tostring(level.id or levelIndex), label, token, function()
-				if not locked then
-					self:_emit("onLevelSelected", level.id or levelIndex, chapter.id or chapterIndex, level)
-				end
-			end, {
-				LayoutOrder = levelIndex,
-				Active = not locked,
-				Selectable = not locked,
-				ZIndex = 6,
-			}, self._levelConnections, self._levelStyles, self._levelTextRoles)
-			if locked then
-				button.TextColor3 = self._palette.TextDisabled
-				self:_setStyleToken(button, "TextColor3", "TextDisabled")
+		local toggle = self:_button(card, "Toggle", expanded and "HIDE" or "OPEN", chapter.unlocked == false and "BackgroundRaised" or (expanded and "Accent" or "PanelRaised"), function()
+			if chapter.unlocked == false then
+				return
 			end
-			table.insert(levelButtons, button)
-		end
-		for index, button in ipairs(levelButtons) do
-			button.NextSelectionLeft = levelButtons[index - 1]
-			button.NextSelectionRight = levelButtons[index + 1]
-			button.NextSelectionUp = levelButtons[index - columns] or self._refs.levelsBack
-			button.NextSelectionDown = levelButtons[index + columns]
+			self._expandedChapterId = if expanded then nil else chapter.id
+			self:_renderLevels(self._chapters)
+			self:_focus(self._chapterToggles[chapterId])
+		end, {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -18, 0, 38),
+			Size = UDim2.fromOffset(82, 44),
+			Active = chapter.unlocked ~= false,
+			Selectable = chapter.unlocked ~= false,
+			ZIndex = 6,
+		}, self._levelConnections, self._levelStyles, self._levelTextRoles)
+		self._chapterToggles[chapterId] = toggle
+		table.insert(chapterNavigation, { button = toggle, firstLevel = nil, levelButtons = nil })
+
+		if expanded then
+			local levelRoot = self:_frame(card, "Levels", nil, {
+				Position = UDim2.new(0, 16, 0, 92), Size = UDim2.new(1, -32, 1, -102), ZIndex = 5,
+			}, self._levelStyles)
+			create("UIGridLayout", {
+				CellPadding = UDim2.fromOffset(8, 8),
+				CellSize = UDim2.new(1 / columns, -8, 0, 54),
+				FillDirectionMaxCells = columns,
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Parent = levelRoot,
+			})
+
+			local levelButtons = {}
+			for levelIndex, level in ipairs(levels) do
+				local stateName = tostring(level.state or (level.locked and "locked" or level.completed and "completed" or "available"))
+				local locked = chapter.unlocked == false or stateName == "locked"
+				local completed = stateName == "completed" or math.max(0, tonumber(level.stars) or 0) > 0
+				local active = stateName == "active"
+				local token = locked and "BackgroundRaised" or completed and "SuccessDark" or active and "Accent" or "PanelRaised"
+				local number = level.number or levelIndex
+				local stars = math.clamp(math.floor(tonumber(level.stars) or 0), 0, 3)
+				local label = locked and ("LOCKED  •  " .. tostring(number))
+					or completed and ("✓  " .. tostring(number) .. "   " .. string.rep("★", stars))
+					or active and ("NOW  •  " .. tostring(number))
+					or ("PLAY  •  " .. tostring(number))
+				local button = self:_button(levelRoot, "Level_" .. tostring(level.id or levelIndex), label, token, function()
+					if not locked then
+						self:_emit("onLevelSelected", level.id or levelIndex, chapter.id or chapterIndex, level)
+					end
+				end, {
+					LayoutOrder = levelIndex,
+					Active = not locked,
+					Selectable = not locked,
+					ZIndex = 6,
+				}, self._levelConnections, self._levelStyles, self._levelTextRoles)
+				if locked then
+					button.TextColor3 = self._palette.TextDisabled
+					self:_setStyleToken(button, "TextColor3", "TextDisabled")
+				end
+				table.insert(levelButtons, button)
+			end
+			chapterNavigation[#chapterNavigation].firstLevel = levelButtons[1]
+			chapterNavigation[#chapterNavigation].levelButtons = levelButtons
+			for index, button in ipairs(levelButtons) do
+				button.NextSelectionLeft = levelButtons[index - 1]
+				button.NextSelectionRight = levelButtons[index + 1]
+				button.NextSelectionUp = levelButtons[index - columns] or toggle
+				button.NextSelectionDown = levelButtons[index + columns]
+			end
 		end
 	end
+	for index, navigation in ipairs(chapterNavigation) do
+		navigation.button.NextSelectionUp = chapterNavigation[index - 1] and chapterNavigation[index - 1].button or self._refs.levelsBack
+		navigation.button.NextSelectionDown = navigation.firstLevel or (chapterNavigation[index + 1] and chapterNavigation[index + 1].button)
+		for _, levelButton in ipairs(navigation.levelButtons or {}) do
+			if not levelButton.NextSelectionDown then
+				levelButton.NextSelectionDown = chapterNavigation[index + 1] and chapterNavigation[index + 1].button
+			end
+		end
+	end
+	task.defer(function()
+		if not self._destroyed and self._refs.levelsScroll then
+			self._refs.levelsScroll.CanvasPosition = previousCanvasPosition
+		end
+	end)
 end
 
 function UIController:_layoutBoard()
@@ -1835,6 +1921,8 @@ function UIController:_layoutBoard()
 	self._refs.cellLayout.CellPadding = UDim2.fromOffset(gap, gap)
 	self._refs.cellLayout.CellSize = UDim2.fromOffset(cellSize, cellSize)
 	self._refs.cellLayout.FillDirectionMaxCells = self._gridWidth
+	self._boardCellSize = cellSize
+	self._boardCellGap = gap
 	task.defer(function()
 		if not self._destroyed then
 			self:_updateTrail()
@@ -1851,12 +1939,14 @@ function UIController:_clearBoard()
 	table.clear(self._cellStates)
 	table.clear(self._wordRows)
 	table.clear(self._foundWords)
-	table.clear(self._previewLookup)
 	table.clear(self._recentSelection)
 	table.clear(self._trailSelection)
 	self._hoveredKey = nil
+	self._hoveredCell = nil
 	self._gridWidth = 0
 	self._gridHeight = 0
+	self._boardCellSize = 0
+	self._boardCellGap = 0
 	self._refs.selectionTrail.Visible = false
 end
 
@@ -1895,16 +1985,6 @@ function UIController:_createCell(row, column, letter, layoutOrder)
 	self:_track(button.SelectionGained:Connect(function()
 		if self._inputEnabled then
 			self:SetHoveredCell(cell, false)
-		end
-	end), self._cellConnections)
-	self:_track(button.MouseEnter:Connect(function()
-		if self._inputEnabled and not self._usingGamepad then
-			self:SetHoveredCell(cell, false)
-		end
-	end), self._cellConnections)
-	self:_track(button.MouseLeave:Connect(function()
-		if not self._usingGamepad and self._hoveredKey == cellKey(row, column) then
-			self:SetHoveredCell(nil)
 		end
 	end), self._cellConnections)
 	return cell
@@ -1975,7 +2055,6 @@ function UIController:_refreshCell(cell)
 	end
 	local key = cellKey(cell.row, cell.column)
 	local state = self._cellStates[key] or {}
-	local selected = self._previewLookup[key] == true
 	local hovered = self._hoveredKey == key
 	local backgroundToken = "BoardCell"
 	local borderToken = "Border"
@@ -1989,10 +2068,6 @@ function UIController:_refreshCell(cell)
 	elseif state.flash == "correct" then
 		backgroundToken = "BoardCorrect"
 		borderToken = "Success"
-		borderThickness = 3
-	elseif selected then
-		backgroundToken = "BoardSelected"
-		borderToken = "Focus"
 		borderThickness = 3
 	elseif state.completed then
 		backgroundToken = nil
@@ -2020,10 +2095,21 @@ function UIController:_refreshAllCells()
 	end
 end
 
+function UIController:_refreshCells(points)
+	local refreshed = {}
+	for _, point in ipairs(type(points) == "table" and points or {}) do
+		local key = cellKey(point.row, point.column)
+		if not refreshed[key] then
+			refreshed[key] = true
+			self:_refreshCell(self:GetCell(point.row, point.column))
+		end
+	end
+end
+
 function UIController:_updateTrail()
 	local selection = self._trailSelection
 	local trail = self._refs.selectionTrail
-	if not trail or #selection < 2 then
+	if not trail or #selection < 1 then
 		if trail then trail.Visible = false end
 		return
 	end
@@ -2037,8 +2123,9 @@ function UIController:_updateTrail()
 	local firstCenter = first.button.AbsolutePosition - canvasPosition + (first.button.AbsoluteSize * 0.5)
 	local lastCenter = last.button.AbsolutePosition - canvasPosition + (last.button.AbsoluteSize * 0.5)
 	local delta = lastCenter - firstCenter
+	local thickness = math.max(20, math.floor(first.button.AbsoluteSize.Y * 0.58))
 	trail.Position = UDim2.fromOffset((firstCenter.X + lastCenter.X) * 0.5, (firstCenter.Y + lastCenter.Y) * 0.5)
-	trail.Size = UDim2.fromOffset(math.max(1, delta.Magnitude), math.max(18, math.floor(first.button.AbsoluteSize.Y * 0.5)))
+	trail.Size = UDim2.fromOffset(delta.Magnitude + thickness, thickness)
 	trail.Rotation = math.deg(math.atan2(delta.Y, delta.X))
 	trail.Visible = true
 end
@@ -2046,6 +2133,7 @@ end
 function UIController:ShowGame(round)
 	round = type(round) == "table" and round or {}
 	self._currentRound = round
+	self._renderedStatus = {}
 	self:_setPage("Game")
 	self._refs.gameTitle.Text = tostring(round.title or "Word Search")
 	local subtitleParts = {}
@@ -2079,21 +2167,17 @@ end
 
 function UIController:UpdateSelection(selection)
 	local normalized = {}
-	local lookup = {}
 	for _, value in ipairs(type(selection) == "table" and selection or {}) do
 		local cell = normalizeCell(value)
 		if cell and self:GetCell(cell.row, cell.column) then
 			table.insert(normalized, cell)
-			lookup[cellKey(cell.row, cell.column)] = true
 		end
 	end
-	self._previewLookup = lookup
 	if #normalized > 0 then
 		self._recentSelection = normalized
 	end
 	self._trailSelection = normalized
 	self._refs.selectionTrail.BackgroundColor3 = self._palette.Accent
-	self:_refreshAllCells()
 	self:_updateTrail()
 end
 
@@ -2106,12 +2190,17 @@ function UIController:SetHoveredCell(cellOrRow, columnOrFocus, shouldFocus)
 	elseif tonumber(cellOrRow) and tonumber(columnOrFocus) then
 		cell = self:GetCell(cellOrRow, columnOrFocus)
 	end
-	local oldKey = self._hoveredKey
-	self._hoveredKey = cell and cellKey(cell.row, cell.column) or nil
-	if oldKey and oldKey ~= self._hoveredKey then
-		local parts = string.split(oldKey, ":")
-		self:_refreshCell(self:GetCell(tonumber(parts[1]), tonumber(parts[2])))
+	local oldCell = self._hoveredCell
+	local newKey = cell and cellKey(cell.row, cell.column) or nil
+	if self._hoveredKey == newKey then
+		if focus and cell and cell.button.Selectable then
+			GuiService.SelectedObject = cell.button
+		end
+		return
 	end
+	self._hoveredKey = newKey
+	self._hoveredCell = cell
+	self:_refreshCell(oldCell)
 	if cell then
 		self:_refreshCell(cell)
 		if focus and cell.button.Selectable then
@@ -2164,7 +2253,7 @@ function UIController:ApplySelectionResult(result)
 		self._trailSelection = normalized
 		local displayedTrail = normalized
 		self._refs.selectionTrail.BackgroundColor3 = self._palette.Error
-		self:_refreshAllCells()
+		self:_refreshCells(normalized)
 		self:_updateTrail()
 		self._animation:Shake(self._refs.boardCard, { distance = 6 })
 		self._audio:Play("Incorrect", { volume = 0.75 })
@@ -2185,7 +2274,7 @@ function UIController:ApplySelectionResult(result)
 				self._trailSelection = {}
 				self._refs.selectionTrail.BackgroundColor3 = self._palette.Accent
 			end
-			self:_refreshAllCells()
+			self:_refreshCells(normalized)
 			self:_updateTrail()
 		end)
 		return false
@@ -2211,7 +2300,7 @@ function UIController:ApplySelectionResult(result)
 	self._trailSelection = normalized
 	local displayedTrail = normalized
 	self._refs.selectionTrail.BackgroundColor3 = color
-	self:_refreshAllCells()
+	self:_refreshCells(normalized)
 	self:_updateTrail()
 	self._audio:Play(result.completed == true and "Complete" or "Correct", { volume = 0.8 })
 	if result.message then
@@ -2230,7 +2319,7 @@ function UIController:ApplySelectionResult(result)
 			self._trailSelection = {}
 			self._refs.selectionTrail.BackgroundColor3 = self._palette.Accent
 		end
-		self:_refreshAllCells()
+		self:_refreshCells(normalized)
 		self:_updateTrail()
 	end)
 	return true
@@ -2238,34 +2327,70 @@ end
 
 function UIController:UpdateGameStatus(status)
 	status = status or {}
+	local rendered = self._renderedStatus
+	local timeText
 	if status.timeText ~= nil then
-		self._refs.gameTimer.Text = tostring(status.timeText)
+		timeText = tostring(status.timeText)
 	elseif status.time ~= nil or status.seconds ~= nil then
-		self._refs.gameTimer.Text = formatTime(status.time or status.seconds)
+		timeText = formatTime(status.time or status.seconds)
+	end
+	if timeText ~= nil and rendered.timeText ~= timeText then
+		rendered.timeText = timeText
+		self._refs.gameTimer.Text = timeText
 	end
 	local seconds = tonumber(status.time or status.seconds)
-	self._refs.gameTimer.TextColor3 = self._palette[(seconds and seconds <= 10) and "Error" or "Text"]
+	local timerToken = (seconds and seconds <= 10) and "Error" or "Text"
+	if rendered.timerToken ~= timerToken then
+		rendered.timerToken = timerToken
+		self._refs.gameTimer.TextColor3 = self._palette[timerToken]
+	end
 
-	local found = tonumber(status.foundWords or status.found)
-	if type(status.foundWords) == "table" then
-		found = 0
-		for _, value in pairs(status.foundWords) do
-			if value == true then found += 1 end
+	local hasProgressUpdate = status.foundWords ~= nil
+		or status.found ~= nil
+		or status.totalWords ~= nil
+		or status.total ~= nil
+		or rendered.found == nil
+	if hasProgressUpdate then
+		local found = tonumber(status.foundWords or status.found)
+		if type(status.foundWords) == "table" then
+			found = 0
+			for _, value in pairs(status.foundWords) do
+				if value == true then found += 1 end
+			end
+		end
+		found = math.max(0, math.floor(found or rendered.found or 0))
+		local total = math.max(0, math.floor(tonumber(status.totalWords or status.total) or rendered.total or (self._currentRound and self._currentRound.words and #self._currentRound.words) or 0))
+		if rendered.found ~= found or rendered.total ~= total then
+			rendered.found = found
+			rendered.total = total
+			self._refs.gameProgressText.Text = string.format("%d / %d", found, total)
+			self._refs.wordCount.Text = string.format("%d remaining", math.max(0, total - found))
+			local alpha = total > 0 and math.clamp(found / total, 0, 1) or 0
+			self._animation:Tween(self._refs.gameProgressFill, { Size = UDim2.fromScale(alpha, 1) }, "Normal")
 		end
 	end
-	found = math.max(0, math.floor(found or 0))
-	local total = math.max(0, math.floor(tonumber(status.totalWords or status.total) or (self._currentRound and self._currentRound.words and #self._currentRound.words) or 0))
-	self._refs.gameProgressText.Text = string.format("%d / %d", found, total)
-	self._refs.wordCount.Text = string.format("%d remaining", math.max(0, total - found))
-	local alpha = total > 0 and math.clamp(found / total, 0, 1) or 0
-	self._animation:Tween(self._refs.gameProgressFill, { Size = UDim2.fromScale(alpha, 1) }, "Normal")
 
-	local hints = math.max(0, math.floor(tonumber(status.hintsRemaining or status.hints) or 0))
-	self._refs.hintButton.Text = "HINT  •  " .. tostring(hints)
-	self._refs.hintButton.Active = status.hintEnabled ~= false
-	self._refs.hintButton.Selectable = status.hintEnabled ~= false
+	if status.hintsRemaining ~= nil or status.hints ~= nil or rendered.hints == nil then
+		local hints = math.max(0, math.floor(tonumber(status.hintsRemaining or status.hints) or rendered.hints or 0))
+		if rendered.hints ~= hints then
+			rendered.hints = hints
+			self._refs.hintButton.Text = "HINT  •  " .. tostring(hints)
+		end
+	end
+	if status.hintEnabled ~= nil or rendered.hintEnabled == nil then
+		local hintEnabled = status.hintEnabled ~= false
+		if rendered.hintEnabled ~= hintEnabled then
+			rendered.hintEnabled = hintEnabled
+			self._refs.hintButton.Active = hintEnabled
+			self._refs.hintButton.Selectable = hintEnabled
+		end
+	end
 	if status.message ~= nil then
-		self._refs.gameStatus.Text = tostring(status.message)
+		local message = tostring(status.message)
+		if rendered.message ~= message then
+			rendered.message = message
+			self._refs.gameStatus.Text = message
+		end
 	end
 	if status.inputEnabled ~= nil then
 		self:SetInputEnabled(status.inputEnabled == true)
@@ -2310,7 +2435,14 @@ function UIController:_startTutorialDemo()
 	for _, cell in ipairs(demoCells) do
 		cell.BackgroundColor3 = self._palette.BoardCell
 	end
+	local trail = self._refs.tutorialTrail
+	trail.BackgroundColor3 = self._palette.Accent
+	trail.Size = UDim2.fromOffset(32, 32)
+	trail.Visible = false
 	if self._settings.reducedMotion then
+		trail.Size = UDim2.fromOffset(212, 32)
+		trail.BackgroundColor3 = self._palette.Success
+		trail.Visible = true
 		for index = 1, math.min(4, #demoCells) do
 			demoCells[index].BackgroundColor3 = self._palette.BoardCorrect
 		end
@@ -2321,6 +2453,9 @@ function UIController:_startTutorialDemo()
 	task.spawn(function()
 		while not self._destroyed and self._activeModal == "Tutorial" and self._tutorialToken == token do
 			self._refs.tutorialStep.Text = "1. Press and hold the first letter."
+			trail.BackgroundColor3 = self._palette.Accent
+			trail.Size = UDim2.fromOffset(32, 32)
+			trail.Visible = false
 			for _, cell in ipairs(demoCells) do
 				cell.BackgroundColor3 = self._palette.BoardCell
 			end
@@ -2328,12 +2463,13 @@ function UIController:_startTutorialDemo()
 			for index = 1, math.min(4, #demoCells) do
 				if self._activeModal ~= "Tutorial" or self._tutorialToken ~= token then return end
 				self._refs.tutorialStep.Text = index == 1 and "2. Hold and drag in a straight line." or "2. Keep dragging through the word."
-				demoCells[index].BackgroundColor3 = self._palette.BoardSelected
-				self._animation:Pulse(demoCells[index], { peakScale = 1.08 })
+				trail.Visible = true
+				self._animation:Tween(trail, { Size = UDim2.fromOffset(32 + ((index - 1) * 60), 32) }, "Normal")
 				task.wait(0.28)
 			end
 			if self._activeModal ~= "Tutorial" or self._tutorialToken ~= token then return end
 			self._refs.tutorialStep.Text = "3. Release on D to submit WORD."
+			trail.BackgroundColor3 = self._palette.Success
 			for index = 1, math.min(4, #demoCells) do
 				demoCells[index].BackgroundColor3 = self._palette.BoardCorrect
 			end
@@ -2474,18 +2610,28 @@ function UIController:GetCellAtPosition(position)
 	if not bounds or position.X < bounds.min.X or position.X > bounds.max.X or position.Y < bounds.min.Y or position.Y > bounds.max.Y then
 		return nil
 	end
-	for _, row in pairs(self._cells) do
-		for _, cell in pairs(row) do
-			local cellPosition = cell.button.AbsolutePosition
-			local size = cell.button.AbsoluteSize
-			if position.X >= cellPosition.X and position.X <= cellPosition.X + size.X
-				and position.Y >= cellPosition.Y and position.Y <= cellPosition.Y + size.Y
-			then
-				return cell
-			end
-		end
+	local cellSize = self._boardCellSize
+	local gap = self._boardCellGap
+	if cellSize <= 0 or not self._refs.boardCanvas then
+		return nil
 	end
-	return nil
+
+	local relative = position - self._refs.boardCanvas.AbsolutePosition
+	local stride = cellSize + gap
+	if relative.X < 0 or relative.Y < 0 then
+		return nil
+	end
+	local column = math.floor(relative.X / stride) + 1
+	local row = math.floor(relative.Y / stride) + 1
+	if row > self._gridHeight or column > self._gridWidth then
+		return nil
+	end
+	local withinX = relative.X - ((column - 1) * stride)
+	local withinY = relative.Y - ((row - 1) * stride)
+	if withinX > cellSize or withinY > cellSize then
+		return nil
+	end
+	return self:GetCell(row, column)
 end
 
 function UIController:GetBoardBounds()

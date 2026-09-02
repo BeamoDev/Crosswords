@@ -1,11 +1,17 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local PuzzleGenerator = {}
 
-local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
-local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
-local GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
-local PuzzleValidator = require(assert(script.Parent:WaitForChild("PuzzleValidator", 10), "Word Search PuzzleValidator is missing"))
+local GameConfig
+local PuzzleValidator
+if game then
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
+	local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
+	GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
+	PuzzleValidator = require(assert(script.Parent:WaitForChild("PuzzleValidator", 10), "Word Search PuzzleValidator is missing"))
+else
+	GameConfig = require("../../shared/config/GameConfig")
+	PuzzleValidator = require("./PuzzleValidator")
+end
 
 local MODULUS = 2147483647
 local MAX_SEED = PuzzleValidator.MaxSeed
@@ -184,14 +190,39 @@ local function placeAllWords(definition, seed)
 	local placements = table.create(#records)
 	local visitedNodes = 0
 	local exhaustedBudget = false
+	local directionUsage = {}
+	local requiredDirections = {}
+	if definition.difficulty == "Medium" and #records >= 2 then
+		requiredDirections[1] = seed % 2 == 0 and "SE" or "SW"
+	elseif definition.difficulty == "Hard" and #records >= 3 then
+		requiredDirections[1] = seed % 2 == 0 and "N" or "W"
+		requiredDirections[2] = seed % 3 == 0 and "SE" or "SW"
+	elseif definition.difficulty == "Expert" and #records >= 4 then
+		-- NE/NW satisfies both the diagonal and reverse requirements. The first
+		-- four words are then kept on distinct headings for readable variety.
+		requiredDirections[1] = seed % 2 == 0 and "NE" or "NW"
+	end
 
 	local function search(recordIndex)
 		if recordIndex > #records then
-			return true
+			-- Reject a fully placed board that does not yet meet the difficulty's
+			-- direction mix. Backtracking here finds a compliant layout in the same
+			-- search pass instead of throwing away an otherwise valid generation.
+			return PuzzleValidator.ValidateDirectionCoverage(placements, definition.difficulty)
 		end
 
 		local record = records[recordIndex]
 		for _, candidate in ipairs(record.candidates) do
+			local requiredDirection = requiredDirections[recordIndex]
+			if requiredDirection and candidate.direction ~= requiredDirection then
+				continue
+		end
+			if definition.difficulty == "Expert"
+				and recordIndex <= 4
+				and (directionUsage[candidate.direction] or 0) > 0
+			then
+				continue
+			end
 			visitedNodes += 1
 			if visitedNodes > DEFAULT_SEARCH_NODES then
 				exhaustedBudget = true
@@ -200,6 +231,7 @@ local function placeAllWords(definition, seed)
 
 			if canPlace(grid, record.word, candidate.path) then
 				place(grid, usage, record.word, candidate.path)
+				directionUsage[candidate.direction] = (directionUsage[candidate.direction] or 0) + 1
 				placements[record.originalIndex] = {
 					id = makeTargetId(definition.id, record.word),
 					word = record.word,
@@ -212,6 +244,7 @@ local function placeAllWords(definition, seed)
 				end
 
 				placements[record.originalIndex] = nil
+				directionUsage[candidate.direction] -= 1
 				remove(grid, usage, candidate.path)
 				if exhaustedBudget then
 					return false

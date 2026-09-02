@@ -65,6 +65,10 @@ local function isGamepadInput(inputType)
 	return string.find(tostring(inputType), "Gamepad") ~= nil
 end
 
+local function isDirectPointer(inputType)
+	return inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch
+end
+
 local function inputLabel(inputType)
 	if inputType == Enum.UserInputType.Touch then
 		return "Touch"
@@ -305,13 +309,41 @@ function InputController:_setCursor(cell, focus)
 	if not cell then
 		return
 	end
+	local unchanged = self._cursor
+		and self._cursor.row == cell.row
+		and self._cursor.column == cell.column
 	self._cursor = cell
 	if self._ui and type(self._ui.SetHoveredCell) == "function" then
 		self._ui:SetHoveredCell(cell, focus == true)
 	elseif focus and cell.button then
 		self._guiService.SelectedObject = cell.button
 	end
+	if unchanged and not focus then
+		return
+	end
 	self:_emit("onCursorChanged", copyCell(cell))
+end
+
+function InputController:_setSelectionCursor(cell, inputType)
+	if not isDirectPointer(inputType) then
+		self:_setCursor(cell, isGamepadInput(inputType))
+		return
+	end
+
+	cell = copyCell(cell)
+	if not cell then
+		return
+	end
+	local unchanged = self._cursor
+		and self._cursor.row == cell.row
+		and self._cursor.column == cell.column
+	self._cursor = cell
+	if self._ui and type(self._ui.SetHoveredCell) == "function" then
+		self._ui:SetHoveredCell(nil)
+	end
+	if not unchanged then
+		self:_emit("onCursorChanged", copyCell(cell))
+	end
 end
 
 function InputController:_begin(cell, inputObject, inputType)
@@ -329,7 +361,7 @@ function InputController:_begin(cell, inputObject, inputType)
 	self._selection = { cell }
 	self._activePointer = inputObject
 	self._activePointerType = inputType
-	self:_setCursor(cell, isGamepadInput(inputType))
+	self:_setSelectionCursor(cell, inputType)
 	self:_publishSelection()
 	self:_emit("onSelectionStarted", copyCell(cell), inputLabel(inputType))
 	return true
@@ -352,7 +384,7 @@ function InputController:_update(cell)
 
 	self._selectionEnd = cell
 	self._selection = self:_buildSelection(self._selectionStart, cell)
-	self:_setCursor(self._selection[#self._selection] or cell, isGamepadInput(self._activePointerType))
+	self:_setSelectionCursor(self._selection[#self._selection] or cell, self._activePointerType)
 	self:_publishSelection()
 end
 
@@ -522,7 +554,7 @@ function InputController:_handlePointerEnded(input)
 		self._touchEndpointArmed = false
 		self._selectionEnd = copyCell(cell)
 		self._selection = self:_buildSelection(self._selectionStart, cell)
-		self:_setCursor(self._selection[#self._selection] or cell, false)
+		self:_setSelectionCursor(self._selection[#self._selection] or cell, self._activePointerType)
 		self:_publishSelection()
 		self:_submit()
 		return
@@ -590,10 +622,12 @@ function InputController:_moveCursor(delta, inputType)
 	if not nextCell then
 		return false
 	end
-	self._activePointerType = inputType
-	self:_setCursor(nextCell, true)
 	if self._selectionActive then
+		self._activePointerType = inputType
 		self:_update(nextCell)
+	else
+		self._activePointerType = inputType
+		self:_setCursor(nextCell, true)
 	end
 	return true
 end
@@ -686,6 +720,27 @@ function InputController:Bind()
 		end
 		return Enum.ContextActionResult.Pass
 	end, Enum.KeyCode.Escape, Enum.KeyCode.ButtonB)
+
+	self:_bindAction("Hint", function(_, inputState)
+		if not self:_canInteract() or self._selectionActive or self._userInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		if inputState == Enum.UserInputState.Begin then
+			self:_emit("onHintRequested")
+		end
+		return Enum.ContextActionResult.Sink
+	end, Enum.KeyCode.H, Enum.KeyCode.ButtonX)
+
+	self:_bindAction("Pause", function(_, inputState)
+		if not self:_canInteract() or self._userInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		if inputState == Enum.UserInputState.Begin then
+			self:Cancel("pause_requested")
+			self:_emit("onPauseRequested")
+		end
+		return Enum.ContextActionResult.Sink
+	end, Enum.KeyCode.P, Enum.KeyCode.ButtonStart)
 
 	return self
 end

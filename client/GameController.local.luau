@@ -141,6 +141,8 @@ local loadBootstrap
 local startRound
 local submitSelection
 local renderMenu
+local requestHint
+local setPauseDesired
 local renderLevels
 local renderDaily
 local goToMenu
@@ -568,12 +570,19 @@ startRound = function(request)
 			onSubmitSelection = function(selection, metadata)
 				submitSelection(selection, metadata)
 			end,
+			onHintRequested = function()
+				requestHint()
+			end,
+			onPauseRequested = function()
+				setPauseDesired(true)
+				ui:ShowPause()
+			end,
 		})
 		audio:PlayMusic()
 	end)
 end
 
-local function requestHint()
+requestHint = function()
 	local current = state.currentRound
 	if not current or current.completed or state.hintBusy or state.submissionBusy or state.localPaused then
 		return
@@ -679,7 +688,7 @@ local function pumpPauseRequests()
 	end)
 end
 
-local function setPauseDesired(paused)
+setPauseDesired = function(paused)
 	if not state.currentRound or state.currentRound.completed then
 		return
 	end

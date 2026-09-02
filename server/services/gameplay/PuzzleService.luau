@@ -16,6 +16,7 @@ local PuzzleValidator = require(assert(puzzleFolder:WaitForChild("PuzzleValidato
 local PuzzleService = {}
 
 local sequenceByUserId = {}
+local compiledCache = {}
 
 local function copyArray(values)
 	local result = {}
@@ -135,7 +136,18 @@ function PuzzleService.Create(player, request, snapshot, dailyIdentity)
 		return nil, "This puzzle is temporarily unavailable."
 	end
 
-	local compiled, generationError = PuzzleGenerator.Generate(definition, seed)
+	-- Classic puzzles and authored boards are seed-stable. Reusing their immutable
+	-- compiled representation avoids repeating the generator's backtracking work
+	-- every time a player opens or restarts the same level.
+	local cacheKey = (request.mode == "Classic" or definition.kind == "Authored") and definition.id or nil
+	local compiled = cacheKey and compiledCache[cacheKey] or nil
+	local generationError
+	if not compiled then
+		compiled, generationError = PuzzleGenerator.Generate(definition, seed)
+		if compiled and cacheKey then
+			compiledCache[cacheKey] = compiled
+		end
+	end
 	if not compiled then
 		warn(string.format("[PuzzleService] Failed to generate level %s: %s", tostring(definition.id), tostring(generationError)))
 		return nil, "This puzzle could not be generated. Please retry."

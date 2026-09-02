@@ -1,10 +1,14 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local PuzzleValidator = {}
 
-local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
-local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
-local GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
+local GameConfig
+if game then
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
+	local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
+	GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
+else
+	GameConfig = require("../../shared/config/GameConfig")
+end
 
 local MAX_SEED = 2147483646
 local HASH_MODULUS = 2147483647

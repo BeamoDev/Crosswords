@@ -1,16 +1,26 @@
 local PuzzleEngineTests = {}
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local serverFolder = script.Parent.Parent
-local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
-local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
-local contentFolder = assert(serverFolder:WaitForChild("content", 10), "Word Search server content folder is missing")
-local puzzleFolder = assert(serverFolder:WaitForChild("puzzle", 10), "Word Search server puzzle folder is missing")
-local GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
-local LevelCatalog = require(assert(contentFolder:WaitForChild("LevelCatalog", 10), "Word Search LevelCatalog is missing"))
-local PuzzleValidator = require(assert(puzzleFolder:WaitForChild("PuzzleValidator", 10), "Word Search PuzzleValidator is missing"))
-local PuzzleGenerator = require(assert(puzzleFolder:WaitForChild("PuzzleGenerator", 10), "Word Search PuzzleGenerator is missing"))
+local GameConfig
+local LevelCatalog
+local PuzzleValidator
+local PuzzleGenerator
+if game then
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local serverFolder = script.Parent.Parent
+	local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
+	local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
+	local contentFolder = assert(serverFolder:WaitForChild("content", 10), "Word Search server content folder is missing")
+	local puzzleFolder = assert(serverFolder:WaitForChild("puzzle", 10), "Word Search server puzzle folder is missing")
+	GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
+	LevelCatalog = require(assert(contentFolder:WaitForChild("LevelCatalog", 10), "Word Search LevelCatalog is missing"))
+	PuzzleValidator = require(assert(puzzleFolder:WaitForChild("PuzzleValidator", 10), "Word Search PuzzleValidator is missing"))
+	PuzzleGenerator = require(assert(puzzleFolder:WaitForChild("PuzzleGenerator", 10), "Word Search PuzzleGenerator is missing"))
+else
+	GameConfig = require("../../shared/config/GameConfig")
+	LevelCatalog = require("../content/LevelCatalog")
+	PuzzleValidator = require("../puzzle/PuzzleValidator")
+	PuzzleGenerator = require("../puzzle/PuzzleGenerator")
+end
 
 local EXPECTED_CHAPTERS = { "Animals", "Food", "Nature", "Roblox", "Space", "Expert" }
 local ALL_DIRECTIONS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
@@ -148,12 +158,12 @@ local TESTS = {
 	{
 		name = "catalog has stable complete structure",
 		run = function()
-			assertTruthy(LevelCatalog.GetLevelCount() >= 18, "Catalog must contain at least 18 levels")
+			assertEqual(LevelCatalog.GetLevelCount(), 120, "Catalog must contain the complete 120-level campaign")
 			local chapters = LevelCatalog.GetChapters()
 			assertEqual(#chapters, #EXPECTED_CHAPTERS, "Catalog chapter count differs")
 			for index, expectedId in ipairs(EXPECTED_CHAPTERS) do
 				assertEqual(chapters[index].id, expectedId, "Catalog chapter order differs")
-				assertTruthy(#chapters[index].levelIds > 0, "Every chapter must own at least one level")
+				assertEqual(#chapters[index].levelIds, 20, "Every chapter must own exactly 20 levels")
 			end
 
 			local publicCatalog = LevelCatalog.GetPublicCatalog()
@@ -221,7 +231,7 @@ local TESTS = {
 			assertTruthy(first ~= nil, tostring(firstError))
 			assertTruthy(second ~= nil, tostring(secondError))
 			assertSameCompiled(first, second)
-			assertEqual(first.boardHash, "3b5e2edd", "Default deterministic fixture changed without a generator revision")
+			assertEqual(first.boardHash, "39d3a049", "Default deterministic fixture changed without a generator revision")
 
 			local overriddenA, overrideErrorA = PuzzleGenerator.Generate(definition, 1234567)
 			local overriddenB, overrideErrorB = PuzzleGenerator.Generate(definition, 1234567)
@@ -229,7 +239,7 @@ local TESTS = {
 			assertTruthy(overriddenB ~= nil, tostring(overrideErrorB))
 			assertSameCompiled(overriddenA, overriddenB)
 			assertEqual(overriddenA.seed, 1234567, "Compiled puzzle lost seed override")
-			assertEqual(overriddenA.boardHash, "25b6bebd", "Override deterministic fixture changed without a generator revision")
+			assertEqual(overriddenA.boardHash, "4ad3ba62", "Override deterministic fixture changed without a generator revision")
 			assertTruthy(first.boardHash ~= overriddenA.boardHash, "Different seeds unexpectedly produced the same fixture hash")
 		end,
 	},

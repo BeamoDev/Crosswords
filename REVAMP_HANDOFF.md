@@ -48,7 +48,7 @@ The client builds the complete HUD at runtime, previews input, and renders serve
 
 The supported product flows are:
 
-- Classic: a 24-level, six-chapter progression with locks, best times, and best stars.
+- Classic: a 120-level, six-chapter progression with locks, best times, and best stars. Each chapter has four original levels plus sixteen deterministic, data-driven expansion levels.
 - Quick: chooses an unlocked puzzle near the player's current progression and generates a fresh server seed.
 - Daily: deterministic UTC puzzle identity from a pinned rotation manifest, plus a once-per-day hint/XP reward with streak tracking.
 - Zen: supported by the server contract as an untimed, explicitly unranked mode, but intentionally has no primary-menu button yet.
@@ -73,6 +73,8 @@ All remotes live under `ReplicatedStorage.WordSearchRevampRemotes` and are creat
 | Event | `ServerNotice` | server to client only | presentation notices |
 
 The client cannot submit a word, board, seed, elapsed time, stars, XP, hint reward, unlock, or completion flag. A submitted endpoint pair is expanded and matched against a server-only path lookup. Round-wide action serialization prevents overlapping selection/hint writes. Completion receipts make reward writes idempotent, including an ambiguous DataStore response retry. Implausibly fast solves and excessive completion velocity (checked both in memory and against durable receipts across server hops) finish visually but grant no progression and cause no completion write.
+
+The board input hot path uses arithmetic grid hit-testing instead of scanning every cell. Mouse hover only repaints when the hovered cell changes, drag previews update one rounded capsule without recoloring letter tiles, result feedback repaints only affected cells, and unchanged timer/progress values are not re-rendered. The level browser expands one chapter at a time so the 120-level catalog does not create every level button at once. `H` / gamepad X requests a hint, and `P` / gamepad Start pauses.
 
 ## Datastore
 
@@ -130,7 +132,7 @@ Run the validation suite after every content edit:
 require(game.ServerScriptService.server.tests.PuzzleEngineTests).Run()
 ```
 
-The server also runs this suite automatically in Studio and reports the pass count. Tests cover the whole catalog, deterministic fixture hashes, eight directions, malformed data, duplicate occurrences, reverse-path collisions, and palindromes. If generator behavior intentionally changes, increment `GameConfig.GeneratorVersion`, update `ContentRevision`, and deliberately update the pinned fixture hashes. Daily rotation IDs and `DailyRotation.Revision` are intentionally separate; stage changes just after a UTC rollover so mixed live servers cannot split the day's identity.
+The server also runs this suite automatically in Studio and reports the pass count. The same module can be required by the standalone Luau CLI for fast local audits. Tests cover all 120 levels, deterministic fixture hashes, eight directions, malformed data, duplicate occurrences, reverse-path collisions, and palindromes. If generator behavior intentionally changes, increment `GameConfig.GeneratorVersion`, update `ContentRevision`, and deliberately update the pinned fixture hashes. Daily rotation IDs and `DailyRotation.Revision` are intentionally separate; stage changes just after a UTC rollover so mixed live servers cannot split the day's identity.
 
 ## Placeholder assets
 
@@ -217,10 +219,10 @@ Git retains the exact removed versions at the checkpoint above.
 1. Sync or copy this source tree into the same services/folders used by the existing project. Confirm there is exactly one active `GameController` LocalScript and one `ServerBootstrap` Script.
 2. If the place contains a manually authored legacy HUD in `StarterGui`, disable or remove it after confirming `WordSearchRevampHUD` appears. The new HUD is fully scripted and uses display order 20.
 3. Start a Studio server with at least two players. Confirm both reach Loading, Menu, Levels, Daily, and a playable board without infinite-yield warnings.
-4. Run `PuzzleEngineTests.Run()` and require every test to pass. Confirm all 24 catalog levels generate.
+4. Run `PuzzleEngineTests.Run()` and require every test to pass. Confirm all 120 catalog levels generate.
 5. On desktop, drag valid, invalid, duplicate, backward, vertical, diagonal, and overlapping words; release outside the board; rapidly submit; pause/resume; request hints; respawn and leave mid-round.
 6. In Device Emulator, check narrow phone portrait/landscape, tablet, 16:9 desktop, ultrawide, and console safe areas. Verify 48 px minimum controls, readable cells, no overlap, and usable touch dragging. On an Expert board, also tap a starting letter, pan the oversized board, and tap the ending letter to verify the long-word touch fallback.
-7. With a gamepad, navigate every screen, select a start/end cell, cancel a selection, open/close modals, and verify visible focus strokes.
+7. With a gamepad, navigate every screen and collapsed chapter, select a start/end cell, cancel a selection, use X for a hint and Start to pause, open/close modals, and verify visible focus strokes.
 8. Toggle music, SFX, reduced motion, and high contrast. Rejoin in a published test universe to verify production persistence; Studio intentionally resets its memory profile when the server stops.
 9. Complete Classic levels with different times/mistakes/hints. Confirm stars only improve, best time decreases, the next level unlocks, pausing caps the result at two stars, and Replay cannot duplicate the same round receipt.
 10. Complete Daily twice, around UTC reset if practical. Confirm its daily reward grants once, streak changes once, and reset identity is shared between players.

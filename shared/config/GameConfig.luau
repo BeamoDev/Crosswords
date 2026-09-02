@@ -3,8 +3,8 @@ local GameConfig = {}
 -- Changing either revision deliberately invalidates an in-flight round. This keeps
 -- saved progression stable when puzzle content or generation rules are updated.
 GameConfig.SchemaVersion = 1
-GameConfig.ContentRevision = "2026.09.02-r1"
-GameConfig.GeneratorVersion = 1
+GameConfig.ContentRevision = "2026.09.02-r2"
+GameConfig.GeneratorVersion = 2
 GameConfig.DataStoreName = "WordSearchRevamp_v1"
 
 -- This manifest is deliberately independent from ContentRevision. Change its

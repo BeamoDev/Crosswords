@@ -1,10 +1,14 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local LevelCatalog = {}
 
-local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
-local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
-local GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
+local GameConfig
+if game then
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local sharedFolder = assert(ReplicatedStorage:WaitForChild("shared", 10), "Word Search shared folder is missing")
+	local configFolder = assert(sharedFolder:WaitForChild("config", 10), "Word Search config folder is missing")
+	GameConfig = require(assert(configFolder:WaitForChild("GameConfig", 10), "Word Search GameConfig is missing"))
+else
+	GameConfig = require("../../shared/config/GameConfig")
+end
 
 local DIRECTION_PROFILES = {
 	Easy = { "E", "S" },
@@ -241,6 +245,200 @@ local levels = {
 		"CHAMPIONSHIP", "EXPLORATION", "DISCOVERY", "ADVENTURE", "KNOWLEDGE", "STRATEGY", "VICTORIOUS", "ENDURANCE", "MASTERY", "TRIUMPH", "LEGENDARY", "CHALLENGE",
 	}),
 }
+
+-- The first four levels in each chapter are intentionally hand-curated above. The
+-- extended campaign is data-driven: every definition owns a deterministic word
+-- list and seed, while PuzzleGenerator builds and validates the actual letter grid.
+-- New bonus levels are interleaved in catalog order so players unlock variety
+-- across chapters instead of grinding sixteen consecutive levels in one theme.
+local EXPANSION_CONTENT = {
+	Animals = {
+		slug = "animals",
+		titles = {
+			"Safari Tracks", "Ocean Parade", "Feathered Friends", "Forest Footprints",
+			"Tiny Creatures", "Arctic Expedition", "Jungle Chorus", "Desert Dwellers",
+			"River Wildlife", "Night Hunters", "Island Habitat", "Mountain Herds",
+			"Rainforest Rally", "Creature Kingdom", "Wildlife Atlas", "Animal Odyssey",
+		},
+		words = {
+			"PANTHER", "JAGUAR", "GIRAFFE", "ZEBRA", "MONKEY", "RABBIT", "TURTLE", "DOLPHIN",
+			"WHALE", "SHARK", "OCTOPUS", "PENGUIN", "EAGLE", "FALCON", "PARROT", "OWL",
+			"FOX", "WOLF", "OTTER", "BADGER", "HAMSTER", "DONKEY", "HORSE", "SHEEP",
+			"LLAMA", "CAMEL", "KOALA", "WOMBAT", "MEERKAT", "RACCOON", "SQUIRREL", "HEDGEHOG",
+			"BUTTERFLY", "DRAGONFLY", "BEETLE", "SPIDER", "CRICKET", "LOBSTER", "SALMON", "SEAHORSE",
+			"STINGRAY", "JELLYFISH", "CROCODILE", "ALLIGATOR", "RHINOCEROS", "HIPPOPOTAMUS", "ELEPHANT", "KANGAROO",
+			"CHIMPANZEE", "FLAMINGO", "PEACOCK", "OSTRICH", "GAZELLE", "BUFFALO", "BISON", "MOOSE",
+			"REINDEER", "LEOPARD", "CHEETAH", "HYENA", "GORILLA", "IGUANA",
+		},
+	},
+	Food = {
+		slug = "food",
+		titles = {
+			"Fruit Stand", "Garden Pantry", "Breakfast Table", "Pizza Party",
+			"Bakery Window", "Street Food", "Family Feast", "Sweet Tooth",
+			"Global Kitchen", "Picnic Basket", "Cafe Rush", "Harvest Dinner",
+			"Chef Challenge", "Festival Flavors", "Midnight Menu", "Ultimate Banquet",
+		},
+		words = {
+			"BANANA", "ORANGE", "STRAWBERRY", "BLUEBERRY", "RASPBERRY", "WATERMELON", "MANGO", "PAPAYA",
+			"APRICOT", "PLUM", "CHERRY", "LEMON", "LIME", "ONION", "GARLIC", "POTATO",
+			"TOMATO", "CUCUMBER", "LETTUCE", "SPINACH", "CABBAGE", "CELERY", "RADISH", "PUMPKIN",
+			"PEPPER", "CHEESE", "YOGURT", "BUTTER", "OMELETTE", "SAUSAGE", "BACON", "CHICKEN",
+			"TURKEY", "STEAK", "PASTA", "PIZZA", "TACO", "SUSHI", "CURRY", "SOUP",
+			"CEREAL", "GRANOLA", "BROWNIE", "DONUT", "PUDDING", "CUSTARD", "VANILLA", "HONEY",
+			"JAM", "BAGEL", "TOAST", "BISCUIT", "CRACKER", "LASAGNA", "RISOTTO", "DUMPLING",
+			"MEATBALL", "SMOOTHIE", "LEMONADE", "ESPRESSO", "KETCHUP", "MUSTARD", "MAYO",
+		},
+	},
+	Nature = {
+		slug = "nature",
+		titles = {
+			"Coastal Path", "Desert Bloom", "Alpine Trail", "Wetland Wonders",
+			"Stone and Soil", "Changing Skies", "Hidden Lagoon", "Frozen North",
+			"Storm Watch", "Forest Canopy", "Island Winds", "Earth in Motion",
+			"Wild Ecosystems", "Natural Forces", "Planet Wilderness", "Endless Outdoors",
+		},
+		words = {
+			"OCEAN", "BEACH", "COAST", "ISLAND", "DESERT", "JUNGLE", "PRAIRIE", "SAVANNA",
+			"TUNDRA", "CAVE", "CLIFF", "RIDGE", "SUMMIT", "CRATER", "GEYSER", "LAGOON",
+			"STREAM", "CREEK", "POND", "LAKE", "MARSH", "SWAMP", "WETLAND", "CORAL",
+			"REEF", "SAND", "SOIL", "MOSS", "FERN", "BLOSSOM", "PETAL", "ROOT",
+			"BARK", "BRANCH", "SEED", "ACORN", "PEBBLE", "BOULDER", "GRANITE", "CRYSTAL",
+			"BREEZE", "WIND", "FROST", "SNOW", "HAIL", "MIST", "FOG", "DEW",
+			"DROPLET", "MONSOON", "CYCLONE", "TORNADO", "HURRICANE", "EARTHQUAKE", "ERUPTION", "GEOTHERMAL",
+			"ECOSYSTEM", "HABITAT", "CANOPY", "RAINFOREST", "SUNSHINE", "MOONLIGHT", "STARLIGHT",
+		},
+	},
+	Roblox = {
+		slug = "roblox",
+		titles = {
+			"Obby Workshop", "Quest Hub", "Builder Basics", "Scripting Sprint",
+			"Avatar Adventure", "Tycoon Toolkit", "Interface Lab", "Physics Playground",
+			"Creator Challenge", "Multiplayer Mayhem", "Asset Library", "Terrain Teamwork",
+			"Systems Online", "Studio Specialist", "Engine Expert", "Creator Odyssey",
+		},
+		words = {
+			"PLATFORM", "RESPAWN", "INVENTORY", "QUEST", "PORTAL", "VEHICLE", "CAMERA", "LIGHTING",
+			"TERRAIN", "MATERIAL", "TEXTURE", "MESH", "MODEL", "FOLDER", "INSTANCE", "EVENT",
+			"FUNCTION", "VARIABLE", "VECTOR", "CFRAME", "PHYSICS", "COLLISION", "ANCHOR", "WELD",
+			"CONSTRAINT", "RAYCAST", "PATHFINDING", "NAVIGATION", "GUI", "BUTTON", "FRAME", "CANVAS",
+			"VIEWPORT", "TWEEN", "SOUND", "MUSIC", "CHAT", "TEAM", "SCORE", "COINS",
+			"SHOP", "PETS", "TRADE", "CRAFTING", "SURVIVAL", "ADVENTURE", "SIMULATOR", "SPEEDRUN",
+			"PARKOUR", "BATTLE", "ROUND", "LOBBY", "MATCHMAKING", "FRIENDS", "GROUP", "CREATOR",
+			"PUBLISH", "PLUGIN", "ASSET", "PACKAGE", "DEBUGGER", "PROFILE", "THUMBNAIL",
+		},
+	},
+	Space = {
+		slug = "space",
+		titles = {
+			"Solar Survey", "Moon Mission", "Planet Patrol", "Rover Route",
+			"Astronaut Academy", "Nebula Crossing", "Launch Complex", "Cosmic Signals",
+			"Deep Space Probe", "Galaxy Guide", "Stellar Science", "Mission Control",
+			"Interstellar Voyage", "Edge of Orbit", "Cosmic Frontier", "Universe Unbound",
+		},
+		words = {
+			"MERCURY", "VENUS", "EARTH", "JUPITER", "URANUS", "NEPTUNE", "PLUTO", "SOLAR",
+			"LUNAR", "CRATER", "VACUUM", "RADIATION", "ATMOSPHERE", "EXOPLANET", "BLACKHOLE", "PULSAR",
+			"QUASAR", "DWARF", "CLUSTER", "ORBITER", "PROBE", "ROVER", "MODULE", "LAUNCH",
+			"BOOSTER", "ENGINE", "FUEL", "HELMET", "SPACESUIT", "MISSION", "VOYAGE", "DOCKING",
+			"PAYLOAD", "CREW", "CONTROL", "SIGNAL", "ANTENNA", "RADAR", "OBSERVATORY", "ASTRONOMY",
+			"COSMOLOGY", "LIGHTYEAR", "AURORA", "MAGNETIC", "ECLIPTIC", "EQUINOX", "SOLSTICE", "ZODIAC",
+			"PHOTON", "PARTICLE", "FUSION", "HELIUM", "HYDROGEN", "IMPACT", "MOONDUST", "STARFIELD",
+			"MILKYWAY", "ANDROMEDA", "HORIZON", "DISCOVERY", "EXPLORER", "INTERSTELLAR",
+		},
+	},
+	Expert = {
+		slug = "expert",
+		titles = {
+			"Algorithm Alley", "Scholar Summit", "Logic Labyrinth", "Knowledge Matrix",
+			"Precision Grid", "Vocabulary Vault", "Mastermind Map", "Abstract Arena",
+			"Strategic Search", "Complexity Curve", "Grand Lexicon", "Focus Frontier",
+			"Ultimate Pattern", "Expert Equation", "Impossible Index", "Word Search Legend",
+		},
+		words = {
+			"ALGORITHM", "ARCHITECTURE", "BIODIVERSITY", "CHRONOLOGY", "CIRCUMSTANCE", "CIVILIZATION", "COMMUNICATION", "CONSTELLATION",
+			"CONTEMPLATION", "CRYPTOGRAPHY", "DETERMINATION", "ELECTROMAGNET", "ENTREPRENEUR", "ENVIRONMENTAL", "EQUILIBRIUM", "EXPERIMENTAL",
+			"FUNDAMENTAL", "GEOMETRICAL", "HYPOTHESIS", "IMAGINATION", "INFRASTRUCTURE", "INNOVATION", "INTERPRETATION", "JURISDICTION",
+			"LITERATURE", "MATHEMATICS", "METAMORPHOSIS", "MICROSCOPE", "NAVIGATION", "OBSERVATION", "OPPORTUNITY", "ORGANIZATION",
+			"PERSPECTIVE", "PHOTOGRAPHY", "PROBABILITY", "PROGRAMMING", "RECOGNITION", "RELATIONSHIP", "RESPONSIBILITY", "REVOLUTIONARY",
+			"SIGNIFICANCE", "SIMULTANEOUS", "SPECTACULAR", "TECHNOLOGY", "TEMPERATURE", "TRANSFORMATION", "TRANSPARENT", "UNDERSTANDING",
+			"UNIVERSAL", "VELOCITY", "VIBRATION", "ACCELERATION", "ARTICULATION", "CARTOGRAPHY", "COLLABORATION", "COMBINATION",
+			"COMPUTATION", "CONFIGURATION", "COORDINATION", "DECLARATION", "DEFINITION", "DEMONSTRATION", "ENCYCLOPEDIC", "GENERALIZATION",
+			"IDENTIFICATION", "IMPLEMENTATION", "INDEPENDENCE", "INTELLIGENCE", "MULTIPLICATION", "PHILOSOPHICAL", "REPRESENTATION", "STRATEGIC",
+		},
+	},
+}
+
+local function slugify(value)
+	local slug = string.lower(value):gsub("[^a-z0-9]+", "-"):gsub("^%-", ""):gsub("%-$", "")
+	return slug
+end
+
+local function getExpansionSettings(chapterId, order)
+	if chapterId == "Expert" then
+		local size = math.clamp(14 + math.floor((order - 5) / 5), 14, 17)
+		return "Expert", size, math.min(10, 8 + math.floor((order - 3) / 4)), 220 + ((order - 5) * 7)
+	end
+	if order >= 15 then
+		local size = 14 + math.floor((order - 15) / 3)
+		return "Expert", size, order >= 18 and 10 or 9, 215 + ((order - 15) * 8)
+	end
+	local size = math.clamp(11 + math.floor((order - 5) / 4), 11, 13)
+	return "Hard", size, order >= 9 and 8 or 7, 150 + ((order - 5) * 6)
+end
+
+local function pickExpansionWords(bank, startIndex, count, maximumLength)
+	local selected = {}
+	local selectedSet = {}
+	for offset = 0, (#bank * 2) - 1 do
+		local word = bank[((startIndex + offset - 1) % #bank) + 1]
+		-- Five-letter minimums keep large generated boards readable and make an
+		-- accidental second target occurrence in random filler vanishingly rare.
+		if not selectedSet[word] and #word >= 5 and #word <= maximumLength then
+			local conflicts = false
+			for _, existing in ipairs(selected) do
+				if string.find(word, existing, 1, true) or string.find(existing, word, 1, true) then
+					conflicts = true
+					break
+				end
+			end
+			if not conflicts then
+				selectedSet[word] = true
+				table.insert(selected, word)
+				if #selected >= count then
+					return selected
+				end
+			end
+		end
+	end
+	error(string.format("Expansion word bank could not supply %d words of length %d", count, maximumLength))
+end
+
+for order = 5, 20 do
+	for chapterIndex, chapter in ipairs(chapters) do
+		local content = assert(EXPANSION_CONTENT[chapter.id], "Expansion content is missing for " .. chapter.id)
+		local title = assert(content.titles[order - 4], "Expansion title is missing")
+		local difficulty, width, wordCount, timeLimitSeconds = getExpansionSettings(chapter.id, order)
+		local startIndex = (((order - 5) * 11) + ((chapterIndex - 1) * 7)) % #content.words
+		local words = pickExpansionWords(content.words, startIndex, wordCount, width)
+		local levelId = string.format("%s-%02d-%s", content.slug, order, slugify(title))
+		local seed = (chapterIndex * 1000000) + (order * 10007) + 73
+		local description = string.format("A generated %dx%d %s challenge with %d themed words.", width, width, string.lower(difficulty), wordCount)
+		table.insert(levels, makeGenerated(
+			chapter.id,
+			order,
+			levelId,
+			title,
+			description,
+			difficulty,
+			width,
+			width,
+			timeLimitSeconds,
+			seed,
+			words
+		))
+	end
+end
 
 local levelById = {}
 local levelIndexById = {}
