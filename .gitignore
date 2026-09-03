@@ -1,0 +1,31 @@
+# Keep the repository focused on the Script Sync source and repo documentation.
+/*
+!/.gitattributes
+!/.gitignore
+!/.github/
+!/AGENTS.md
+!/README.md
+!/src/
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local logs, temporary files, and credentials
+*.bak
+*.log
+*.tmp
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Local Roblox Studio place files and lock files
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
