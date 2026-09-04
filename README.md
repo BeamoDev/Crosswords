@@ -1,24 +1,30 @@
-# Word Search
+# Word Hunt
 
-Word Search is a Roblox puzzle game with fresh server-generated boards and a fully scripted, cross-device interface. The client renders the board and handles input, while the server owns puzzle paths, round validation, progression, rewards, and saved data.
+Word Hunt is a Roblox puzzle game with fresh server-generated boards and a fully scripted, cross-device interface. The internal `WordSearchRevamp` names remain unchanged so existing remotes and saved data stay compatible. The client renders the board and handles input, while the server owns puzzle paths, round validation, progression, rewards, and saved data.
 
 The current revamp supports:
 
-- 120 Classic levels across Animals, Food, Nature, Roblox, Space, and Expert chapters
+- 1,000 Classic levels across Animals, Food, Nature, Roblox, Space, and Expert chapters
 - Quick Play and a pinned UTC Daily word-list rotation with a fresh grid
 - Mouse, touch, keyboard, and gamepad board selection
 - Stars, XP ranks, coins, hints, achievements, and daily streaks
-- Responsive layouts, reduced motion, high contrast, and colorblind settings
-- Server-side daily rewards, coin purchases, and cosmetic ownership APIs
+- A responsive white-glass HUD over a softly blurred menu sky, with a global navigation drawer and a clean open-letter board with persistent colored word trails
+- A short replayable, interactive tutorial for mouse, touch, keyboard, and controller
+- A paginated chapter browser that keeps only 30–48 of the 1,000 level buttons live at once
+- Continue, Daily, pause/restart, result/best-time, achievement, purchase-confirmation, toast, and error flows built from one shared UI system
+- Reduced motion, high contrast, and colorblind settings
+- Server-backed achievement, shop, daily-reward, purchase, and cosmetic-equipping screens
+- Confirmed hint spending plus live equipped themes, word-trail palettes, menu backgrounds, and board styles
 
-Zen mode is supported by the server contract but is not exposed on the main menu. Shop and daily-login reward APIs are also present without dedicated client screens. Time Attack is not implemented.
+Zen mode is supported by the server contract but is not exposed on the main menu. Time Attack is not implemented.
 
 ## Repository layout
 
 All game source is stored under `src/`:
 
 - `src/client/GameController.local.luau` - client entrypoint and view/remote orchestration
-- `src/client/revamp/` - scripted UI, input, animation, audio, environment, and responsive theme modules
+- `src/client/ui/` - the modular UI application, screens, reusable components, navigation, modals, notifications, responsive layout, theme, and image-asset registry
+- `src/client/revamp/` - retained non-visual input, animation, audio, and environment controllers
 - `src/server/bootstrap/ServerBootstrap.server.luau` - server entrypoint and remote wiring
 - `src/server/content/` - the private level catalog and authored word paths
 - `src/server/puzzle/` - deterministic board generation and validation
@@ -44,7 +50,7 @@ StarterPlayer
 
 The lowercase `ReplicatedStorage.shared` name and the nested folder names are required by the runtime imports. Keep exactly one active `client/GameController` LocalScript and one `server/bootstrap/ServerBootstrap` Script.
 
-The server creates `ReplicatedStorage.WordSearchRevampRemotes`. The client builds `WordSearchRevampHUD` at runtime, so a legacy authored HUD should not run alongside it. Existing sounds may be reused from `SoundService/SFX` and `SoundService/Music`; explicit image and sound IDs remain configurable placeholders in `src/shared/config/GameConfig.luau`.
+The server creates `ReplicatedStorage.WordSearchRevampRemotes`. The client builds `WordSearchUI` at runtime, so a legacy authored HUD or the retired `WordSearchRevampHUD` should not run alongside it. Existing sounds may be reused from `SoundService/SFX` and `SoundService/Music`; explicit image and sound IDs remain configurable placeholders in `src/shared/config/GameConfig.luau`.
 
 ## Validation
 
@@ -54,7 +60,7 @@ In Roblox Studio, the server bootstrap automatically runs the puzzle suite. It c
 require(game.ServerScriptService.server.tests.PuzzleEngineTests).Run()
 ```
 
-Before publishing, test with at least two Studio clients and cover desktop, phone/tablet emulation, gamepad navigation, round replay, Daily rollover, pause/hints, settings, DataStore failure, and shutdown saving. Source inspection cannot verify Studio-authored hierarchy, assets, live DataStores, or published-service behavior.
+Before publishing, test with at least two Studio clients and cover the full first-time tutorial, desktop, phone/tablet emulation, gamepad navigation, drawer close paths, round replay, Daily rollover, pause/hints, shop purchases/equips, settings, DataStore failure, menu-to-game camera restoration, and shutdown saving. Source inspection cannot verify Studio-authored hierarchy, assets, live DataStores, or published-service behavior.
 
 ## Persistence and security
 

@@ -2,10 +2,21 @@
 
 These instructions apply to the entire repository.
 
+## Published-version reconciliation gate (2026-09-04)
+
+- The user has reverted the Roblox Studio place to the currently published version, but that exact Studio source and its authored instances have not yet been synchronized into this checkout.
+- Do not treat the current worktree, `README.md`, or `src/REVAMP_HANDOFF.md` as proof of what is live. The worktree still contains a large, unfinished 1,000-level modular-UI redesign layered over the tracked unpublished revamp.
+- Git commit `a66ebf8` (`checkpoint: pre-revamp source`) is the strongest repository candidate for the published code, but it remains a comparison snapshot until checked against the restored Studio hierarchy and scripts.
+- Before changing gameplay, UI, persistence, remotes, monetization, or content, first export or synchronize the restored Studio source, inspect the exact hierarchy/casing, and update this file plus the README/handoff to match it.
+- Do not reset, check out, delete, publish, or copy either the dirty redesign worktree or `a66ebf8` into Studio without the user's explicit choice. Preserve both for reconciliation.
+- Runtime Studio hierarchy and fresh Server/Client Output override all repository assumptions. Clearly distinguish source inspection from Studio and published-place validation.
+
+The revamp-specific rules below are conditional guidance for the local revamp source. They do not currently describe the confirmed published game.
+
 ## Start here
 
 - Read `README.md` and `src/REVAMP_HANDOFF.md` before modifying gameplay, persistence, remotes, UI structure, or level content.
-- Treat the current source as authoritative. The checked-in revamp replaced the older HUD and service architecture.
+- Once the reconciliation gate above is cleared, treat the selected synchronized source as authoritative rather than an older handoff or redesign draft.
 - Preserve unrelated working-tree changes and keep separate private backups of the Roblox place. This repository does not contain every Studio-authored asset.
 
 ## Runtime boundary and mapping
@@ -14,18 +25,22 @@ These instructions apply to the entire repository.
 - Map `src/client` to `StarterPlayerScripts.client`, `src/server` to `ServerScriptService.server`, and `src/shared` to lowercase `ReplicatedStorage.shared`.
 - Keep exactly one active `GameController` LocalScript and one `ServerBootstrap` Script.
 - The server creates `ReplicatedStorage.WordSearchRevampRemotes`; clients must not create fallback or shadow remotes.
-- The revamp creates `WordSearchRevampHUD` at runtime. Do not enable an old authored HUD alongside it.
+- The client creates `WordSearchUI` at runtime. Do not enable an old authored HUD or the retired `WordSearchRevampHUD` alongside it.
 
 ## Current architecture
 
 - `src/client/GameController.local.luau`
   Client entrypoint. Loads shared configuration, binds remotes, owns view state, and coordinates the scripted UI, input, audio, animation, and environment controllers.
-- `src/client/revamp/UIController.luau`
-  Builds the complete HUD and handles responsive layouts, pages, modals, board rendering, status, tutorial, results, errors, and accessibility styling.
+- `src/client/ui/AppController.luau`
+  Composes the complete `WordSearchUI`, registers screens and modal flows, applies accessibility/cosmetic presentation, and preserves the public UI contract consumed by `GameController` and `InputController`.
+- `src/client/ui/Screens/`
+  Purpose-built modules for loading, home, Classic/chapter/level selection, Daily, gameplay, tutorial, achievements, shop, settings, pause, confirmation, victory, and errors.
+- `src/client/ui/Components/`
+  Reusable top bar, navigation drawer, puzzle board, word list, action toolbar, mode/chapter/level cards, progress, star, modal, and tooltip components.
+- `src/client/ui/Theme.luau`, `Assets.luau`, `ResponsiveController.luau`, `ScreenRouter.luau`, and `ModalController.luau`
+  Central visual tokens and real image-asset slots, safe-area layouts, page focus, and single-modal routing.
 - `src/client/revamp/InputController.luau`
   Handles mouse, touch, keyboard, and gamepad selection. Pointer work is sampled only during an active gesture.
-- `src/client/revamp/Theme.luau`
-  Central responsive, color, text, and transparency tokens.
 - `src/client/revamp/AnimationController.luau`
   Cancellable UI tweens and reduced-motion behavior.
 - `src/client/revamp/AudioController.luau`
@@ -35,7 +50,7 @@ These instructions apply to the entire repository.
 - `src/server/bootstrap/ServerBootstrap.server.luau`
   Server entrypoint. Creates remotes, validates requests, applies rate limits, loads profiles, wires round/economy endpoints, and starts Studio tests.
 - `src/server/content/LevelCatalog.luau`
-  Server-only six-chapter, 120-level catalog. It owns authored definitions and word lists.
+  Server-only six-chapter, 1,000-level catalog. It owns authored definitions, themed word banks, and deterministic expansion rules.
 - `src/server/puzzle/PuzzleGenerator.luau` and `PuzzleValidator.luau`
   Deterministic generation, path compilation, occurrence checks, and definition validation.
 - `src/server/services/gameplay/PuzzleService.luau`
@@ -55,7 +70,7 @@ These instructions apply to the entire repository.
 - `src/server/services/ops/RateLimiter.luau` and `src/server/utils/RemoteValidator.luau`
   Per-player endpoint throttles and bounded remote payload schemas.
 - `src/server/tests/PuzzleEngineTests.luau`
-  Static content and engine coverage, including all 120 levels and deterministic fixtures.
+  Static content and engine coverage, including all 1,000 levels and deterministic fixtures.
 - `src/shared/config/GameConfig.luau`
   Schema/content/generator revisions, datastore name, gameplay bounds, progression, modes, achievements, and asset placeholders.
 - `src/shared/config/RemoteConfig.luau` and `ShopConfig.luau`
@@ -85,13 +100,13 @@ These instructions apply to the entire repository.
 ## Gameplay and content rules
 
 - Current modes are Classic, Quick, Daily, and Zen. Zen is server-supported but intentionally hidden from the main menu; Time Attack is not implemented.
-- Classic has 120 levels in six chapters. Unlock order and best stars/times are durable progression.
+- Classic has 1,000 levels in six chapters. Unlock order and best stars/times are durable progression.
 - Every normal play generates a fresh server-owned seed. A seed remains deterministic for debugging, but replay must not reuse a completion identity.
 - Daily word-list identity is pinned by `GameConfig.DailyRotation`, independent of `ContentRevision`. Schedule rotation changes just after UTC rollover so mixed live servers cannot split the day's challenge.
 - Keep `GameConfig.ContentRevision`, `GeneratorVersion`, catalog definitions, daily rotation, and pinned test hashes consistent. Revision changes deliberately invalidate incompatible in-flight rounds.
 - For new levels, use stable lowercase IDs, valid chapter/order metadata, bounded grids/words, and a supported difficulty. Authored targets must match their words and may not duplicate the same physical path in reverse.
 - Update puzzle generation and server validation together. Never implement a generation rule only in the client.
-- The shop currently spends saved coins. Daily-login claims and cosmetic APIs exist without dedicated client screens; do not document them as visible UI until that UI is actually wired.
+- The shop spends saved coins, and its daily-login claim and cosmetic equip actions are wired into dedicated client screens. Keep those mutations server-authoritative.
 
 ## Client and accessibility rules
 
