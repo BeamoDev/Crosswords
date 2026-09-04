@@ -167,79 +167,6 @@ local function processHintUsed(player, data, stats, storedBoardState, payloadBoa
 	return result, result.accepted == true, result.accepted and nil or "Hint could not be used."
 end
 
-local function processTimedProductUse(player, data, storedBoardState, payloadBoardState, productKind)
-	local validatedBoardState = BoardValidationService.ProcessBoardState(player, storedBoardState, payloadBoardState)
-	if type(validatedBoardState) ~= "table" then
-		return {
-			success = false,
-			message = "Start a timed board to use this product.",
-			snapshot = PlayerDataStore.GetSnapshot(player),
-		}
-	end
-
-	local resourceKey = nil
-	local alreadyUsed = false
-	local currencyName = nil
-	local criticalStep = nil
-	local mode = tostring(validatedBoardState.mode or "unknown")
-
-	if productKind == "time_boost" then
-		resourceKey = "timeBoostsAvailable"
-		alreadyUsed = validatedBoardState.timeBoostUsed == true
-		currencyName = "time_boost"
-		criticalStep = "TimeBoostUsed"
-	elseif productKind == "freeze_time" then
-		resourceKey = "freezeTimeAvailable"
-		alreadyUsed = validatedBoardState.freezeTimeUsed == true
-		currencyName = "freeze_time"
-		criticalStep = "FreezeTimeUsed"
-	else
-		return {
-			success = false,
-			message = "Unknown timed product.",
-			snapshot = PlayerDataStore.GetSnapshot(player),
-		}
-	end
-
-	if alreadyUsed then
-		return {
-			success = false,
-			message = "This board already used that timed product.",
-			snapshot = PlayerDataStore.GetSnapshot(player),
-		}
-	end
-
-	local available = math.max(0, math.floor((data.resources and data.resources[resourceKey]) or 0))
-	if available <= 0 then
-		return {
-			success = false,
-			message = "You do not own that timed product yet.",
-			snapshot = PlayerDataStore.GetSnapshot(player),
-		}
-	end
-
-	data.resources[resourceKey] = available - 1
-	if productKind == "time_boost" then
-		validatedBoardState.timeBoostUsed = true
-	else
-		validatedBoardState.freezeTimeUsed = true
-	end
-	data.boardState = validatedBoardState
-
-	AnalyticsService.TrackEconomySink(player, currencyName, "board_use", 1, {
-		mode = mode,
-	})
-	AnalyticsService.TrackCriticalStep(player, criticalStep, {
-		mode = mode,
-	})
-
-	return {
-		success = true,
-		boardState = validatedBoardState,
-		snapshot = PlayerDataStore.GetSnapshot(player),
-	}
-end
-
 function ProgressionService.RecordAction(player, actionName, payload)
 	payload = type(payload) == "table" and payload or {}
 
@@ -300,8 +227,7 @@ function ProgressionService.RecordAction(player, actionName, payload)
 			local awardedStars = StarRules.CalculateAward(
 				mode,
 				level,
-				finalBoardState and finalBoardState.remainingTime,
-				finalBoardState and finalBoardState.timeBoostUsed == true,
+				finalBoardState and finalBoardState.hintUses,
 				true
 			)
 			local awardedPuzzlePieces, puzzlePieceBreakdown = calculateAwardedPuzzlePieces(
@@ -378,36 +304,12 @@ function ProgressionService.RecordAction(player, actionName, payload)
 			return snapshot
 		end
 	elseif actionName == "BoardLost" then
-		local lossReason = tostring(payload.reason or "")
-		local starBoardState = storedBoardState and BoardValidationService.ProcessBoardState(player, storedBoardState, payloadBoardState)
+		local lossBoardState = storedBoardState and BoardValidationService.ProcessBoardState(player, storedBoardState, payloadBoardState)
 			or storedBoardState
-		local lossMode = type(starBoardState) == "table" and starBoardState.mode or nil
-		local lossLevel = type(starBoardState) == "table" and starBoardState.level or nil
-		local awardedStars = 1
-
-		if lossReason == "timeout" and type(starBoardState) == "table" then
-			local boardInfo = BoardValidationService.GetBoardInfoFromState(starBoardState)
-			local totalWords = math.max(
-				0,
-				math.floor(tonumber(boardInfo and (boardInfo.wordCount or (boardInfo.words and #boardInfo.words))) or 0)
-			)
-			local foundWords = type(starBoardState.foundWords) == "table" and #starBoardState.foundWords or 0
-			awardedStars = StarRules.CalculateLossAward(foundWords, totalWords, true)
-		end
-
-		if type(starBoardState) == "table" and lossMode ~= nil and lossLevel ~= nil then
-			recordStarProgress(
-				data,
-				lossMode,
-				lossLevel,
-				awardedStars,
-				buildStarMetadata(lossMode, dailyIdentity)
-			)
-		end
 
 		PlayerDataStore.RecordModeOutcome(
 			data,
-			(type(starBoardState) == "table" and starBoardState.mode) or nil,
+			(type(lossBoardState) == "table" and lossBoardState.mode) or nil,
 			false
 		)
 		BoardValidationService.ClearBoardState(player)
@@ -462,34 +364,6 @@ function ProgressionService.UseHint(player, payload)
 		snapshot = snapshot,
 		boardState = result and result.boardState or nil,
 	}
-end
-
-function ProgressionService.UseTimedProduct(player, payload)
-	payload = type(payload) == "table" and payload or {}
-
-	local data = PlayerDataStore.GetMutableData(player)
-	MetaService.NormalizeData(data)
-	local progression = data.progression
-	local sanitizedStoredBoardState = PlayerDataStore.SanitizeBoardState(data.boardState)
-	local storedBoardState = filterBoardStateForProgression(sanitizedStoredBoardState, progression)
-	local payloadBoardState = filterBoardStateForProgression(sanitizePayloadBoardState(payload), progression)
-	if sanitizedStoredBoardState and not storedBoardState then
-		data.boardState = nil
-	end
-
-	local dailyCompletedToday = hasCompletedDailyToday(data)
-	if dailyCompletedToday and (isDailyBoardState(storedBoardState) or isDailyBoardState(payloadBoardState)) then
-		BoardValidationService.ClearPlayer(player)
-		data.boardState = nil
-		return {
-			success = false,
-			message = "Daily already completed.",
-			snapshot = PlayerDataStore.GetSnapshot(player),
-			boardState = nil,
-		}
-	end
-
-	return processTimedProductUse(player, data, storedBoardState, payloadBoardState, tostring(payload.kind or ""))
 end
 
 function ProgressionService.ClearPlayer(player)

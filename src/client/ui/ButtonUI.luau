@@ -5,7 +5,6 @@ function module.new(config)
 	local state = config.state
 	local colors = config.colors
 	local runtimeHelpers = config.runtimeHelpers
-	local timedProduct = config.timedProduct
 	local uiEffects = config.uiEffects
 	local ensureScaleController = config.ensureScaleController
 	local bindButtonHoverSound = config.bindButtonHoverSound
@@ -199,53 +198,6 @@ function module.new(config)
 						config.chooseModeLevelIndex(state.mode),
 						config.nextSeed(state.sessionScore + state.puzzlesCleared + 1)
 					)
-				end
-			end)
-		end
-
-		if ui.timeBoostButton and not ui.timeBoostButton:GetAttribute("WordSearchBound") then
-			ui.timeBoostButton:SetAttribute("WordSearchBound", true)
-			ui.timeBoostButton.Activated:Connect(function()
-				if config.isGameplayInteractionBlocked() or not state.gameViewActive then
-					print(string.format(
-						"[WordSearch MoreTime] pressed blocked interactionLocked=%s gameViewActive=%s",
-						tostring(config.isGameplayInteractionBlocked()),
-						tostring(state.gameViewActive == true)
-					))
-					return
-				end
-
-				config.playSound("Button2")
-				local timeBoostCount = math.max(
-					0,
-					math.floor(tonumber(timedProduct.getCount and timedProduct.getCount("time_boost") or 0) or 0)
-				)
-				print(string.format(
-					"[WordSearch MoreTime] pressed count=%d used=%s pendingKind=%s",
-					timeBoostCount,
-					tostring(state.timeBoostUsed == true),
-					tostring(state.pendingTimedProductKind or "nil")
-				))
-				if timedProduct.getCount("time_boost") > 0 then
-					timedProduct.tryUse("time_boost", false)
-				else
-					timedProduct.promptPurchase("time_boost")
-				end
-			end)
-		end
-
-		if ui.freezeTimeButton and not ui.freezeTimeButton:GetAttribute("WordSearchBound") then
-			ui.freezeTimeButton:SetAttribute("WordSearchBound", true)
-			ui.freezeTimeButton.Activated:Connect(function()
-				if config.isGameplayInteractionBlocked() or not state.gameViewActive then
-					return
-				end
-
-				config.playSound("Button2")
-				if timedProduct.getCount("freeze_time") > 0 then
-					timedProduct.tryUse("freeze_time", false)
-				else
-					timedProduct.promptPurchase("freeze_time")
 				end
 			end)
 		end

@@ -16,8 +16,6 @@ local findFirstPath = env.findFirstPath
 local findTextObject = env.findTextObject
 local ensureScaleController = env.ensureScaleController
 local findButtonLike = env.findButtonLike
-local findBarContainer = env.findBarContainer
-local setBarFillAlpha = env.setBarFillAlpha
 local bindButtonHoverSound = env.bindButtonHoverSound
 local applyTextFont = env.applyTextFont
 local getWordRowTemplate = env.getWordRowTemplate
@@ -91,18 +89,18 @@ function RuntimeHelpers.bindExistingUI()
 		hintButton = findButtonLike(findDescendantByNames(gameTopBarContainer or gameFrame or existingGui, { "HintButton", "Hint" }, nil))
 	end
 	local nextButton = findButtonLike(findDescendantByNames(gameFrame or existingGui, { "NextButton" }, nil))
-	local timedModeFrame = gameFrame and findDescendantByNames(gameFrame, { "TimedMode" }, nil) or nil
-	local timedModeTimerLabel = timedModeFrame and findTextObject(timedModeFrame, { "Timer", "TextLabel" }) or nil
-	local timedModeBar = timedModeFrame and findBarContainer(timedModeFrame) or nil
-	local timedModeBarFill = timedModeBar and (
-		findDescendantByNames(timedModeBar, { "Fill", "Body" }, nil) or timedModeBar
-	) or nil
+	for _, retiredControlName in ipairs({ "TimedMode", "MoreTime", "Freeze", "RuntimeCombo", "TimedCombo", "Warning" }) do
+		local retiredControl = findDescendantByNames(gameFrame or existingGui, { retiredControlName }, nil)
+		if retiredControl and retiredControl:IsA("GuiObject") then
+			retiredControl.Visible = false
+			retiredControl.Active = false
+		end
+	end
 	local duelModeRoot = RuntimeHelpers.ensureDuelModeUi(gameFrame)
 	local modeBar = findDescendantByNames(gameFrame or existingGui, { "ModeBar" }, nil)
 	local infoBar = findDescendantByNames(gameFrame or existingGui, { "InfoBar" }, nil)
 	local previousButton = gameFrame and findDescendantByNames(gameFrame, { "PreviousButton", "Previous" }, nil) or nil
 	local streakRoot = findDescendantByNames(gameFrame or existingGui, { "Streak" }, nil)
-	local warningRoot = findDescendantByNames(gameFrame or existingGui, { "Warning" }, nil)
 	local alertsRoot = existingGui:FindFirstChild("Alerts") or findDescendantByNames(existingGui, { "Alerts" }, nil)
 	local alertsList = alertsRoot and (findDescendantByNames(alertsRoot, { "List" }, nil) or alertsRoot) or nil
 	local countdownFrame = framesRoot and (framesRoot:FindFirstChild("Countdown") or framesRoot:FindFirstChild("DuelCountdown") or findDescendantByNames(framesRoot, { "Countdown", "DuelCountdown" }, nil)) or nil
@@ -128,22 +126,6 @@ function RuntimeHelpers.bindExistingUI()
 	ui.topBarShell = gameTopBar
 	ui.gameTopBar = gameTopBar
 	ui.gameTopBarContainer = gameTopBarContainer
-	ui.warningImage = nil
-	ui.warningImageScale = nil
-	if warningRoot and (warningRoot:IsA("ImageLabel") or warningRoot:IsA("ImageButton")) then
-		ui.warningImage = warningRoot
-	elseif warningRoot then
-		ui.warningImage = warningRoot:FindFirstChildWhichIsA("ImageLabel", true)
-			or warningRoot:FindFirstChildWhichIsA("ImageButton", true)
-	end
-	if ui.warningImage then
-		ui.warningImage.Visible = false
-		ui.warningImage.ImageTransparency = 1
-		ui.warningImageScale = ensureScaleController(ui.warningImage)
-		if ui.warningImageScale then
-			ui.warningImageScale.Scale = 1
-		end
-	end
 	ui.streakRoot = streakRoot
 	ui.streakLabel = streakRoot and findTextObject(streakRoot, { "Count", "Label", "TextLabel", "Amount", "Value" }) or nil
 	if not ui.streakLabel and streakRoot and streakRoot:IsA("GuiObject") then
@@ -574,10 +556,6 @@ function RuntimeHelpers.bindExistingUI()
 		ui.hintLocked.Visible = false
 	end
 	ui.nextButton = nextButton
-	ui.timedModeFrame = timedModeFrame
-	ui.timedModeTimerLabel = timedModeTimerLabel
-	ui.timedModeBar = timedModeBar
-	ui.timedModeBarFill = timedModeBarFill
 	ui.duelModeRoot = duelModeRoot
 	local duelModeTitleRoot = duelModeRoot and (
 		duelModeRoot:FindFirstChild("Title")
@@ -624,56 +602,6 @@ function RuntimeHelpers.bindExistingUI()
 	if ui.duelModeOppFill and ui.duelModeOppFill:IsA("GuiObject") then
 		ui.duelModeOppFill.Size = UDim2.new(DUEL_MODE_MIN_FILL_SCALE, 0, 1, 0)
 	end
-	ui.timedModeTimerScale = ui.timedModeTimerLabel and ensureScaleController(ui.timedModeTimerLabel) or nil
-	ui.timedModeTimerLabelBaseColor = ui.timedModeTimerLabel and ui.timedModeTimerLabel.TextColor3 or COLORS.text
-	ui.timedModeFrameBaseColor = ui.timedModeFrame and ui.timedModeFrame.BackgroundColor3 or COLORS.chipSoft
-	ui.timedModeFrameStroke = ui.timedModeFrame and ui.timedModeFrame:FindFirstChildWhichIsA("UIStroke", true) or nil
-	ui.timedModeFrameStrokeBaseColor = ui.timedModeFrameStroke and ui.timedModeFrameStroke.Color or ui.timedModeFrameBaseColor
-	if ui.timedModeBar and ui.timedModeBar:IsA("GuiObject") then
-		ui.timedModeBar.Visible = false
-	end
-	if ui.timedModeFrame and ui.timedModeFrame:IsA("GuiObject") then
-		ui.timedModeFrame.Active = false
-	end
-	ui.timeBoostRoot, ui.timeBoostButton, ui.timeBoostLabel = RuntimeHelpers.ensureTimedActionButton(
-		gameTopBarContainer or gameTopBar or gameFrame or existingGui,
-		{ "MoreTime" }
-	)
-	ui.freezeTimeRoot, ui.freezeTimeButton, ui.freezeTimeLabel = RuntimeHelpers.ensureTimedActionButton(
-		gameTopBarContainer or gameTopBar or gameFrame or existingGui,
-		{ "Freeze" }
-	)
-	ui.timedComboRoot = nil
-	ui.timedComboLabel = nil
-	ui.timedComboBar = nil
-	ui.timedComboBarFill = nil
-	ui.timedComboLabelScale = nil
-	if ui.game or ui.timedModeFrame then
-		local comboParent = ui.game or ui.timedModeFrame
-		ui.timedComboRoot = comboParent:FindFirstChild("RuntimeCombo")
-			or comboParent:FindFirstChild("TimedCombo")
-			or findDescendantByNames(comboParent, { "RuntimeCombo", "TimedCombo", "Combo" }, nil)
-		if ui.timedComboRoot then
-			if ui.timedComboRoot:IsA("GuiObject") and not ui.timedComboRoot:IsA("GuiButton") then
-				ui.timedComboRoot.Active = false
-			end
-			ui.timedComboLabel = findTextObject(ui.timedComboRoot, { "ComboLabel", "Label" })
-			applyTextFont(ui.timedComboLabel, Enum.Font.GothamBold)
-			ui.timedComboLabelScale = ui.timedComboLabel and ensureScaleController(ui.timedComboLabel) or nil
-			ui.timedComboBar = ui.timedComboRoot:FindFirstChild("ComboBar")
-				or findDescendantByNames(ui.timedComboRoot, { "ComboBar", "Bar" }, nil)
-			ui.timedComboBarFill = ui.timedComboBar and (
-				findDescendantByNames(ui.timedComboBar, { "Fill", "Body" }, nil)
-					or ui.timedComboBar:FindFirstChild("Fill")
-			) or nil
-		end
-	end
-	if ui.timeBoostRoot and ui.timeBoostRoot:IsA("GuiObject") and not ui.timeBoostRoot:IsA("GuiButton") then
-		ui.timeBoostRoot.Active = false
-	end
-	if ui.freezeTimeRoot and ui.freezeTimeRoot:IsA("GuiObject") and not ui.freezeTimeRoot:IsA("GuiButton") then
-		ui.freezeTimeRoot.Active = false
-	end
 	ui.alertsRoot = alertsRoot
 	ui.alertsList = alertsList
 	ui.countdownFrame = countdownFrame
@@ -682,13 +610,6 @@ function RuntimeHelpers.bindExistingUI()
 	ui.countdownCardScale = nil
 	ui.countdownCardStroke = nil
 	ui.countdownLabelScale = nil
-	if ui.timedModeFrame and ui.timedModeFrame:IsA("GuiObject") then
-		ui.timedModeFrame.Visible = false
-	end
-	if ui.timedModeTimerLabel then
-		ui.timedModeTimerLabel.Text = "00:00"
-	end
-	setBarFillAlpha(ui.timedModeBarFill, ui.timedModeBar, 0)
 	if ui.alertsRoot and ui.alertsRoot:IsA("GuiObject") then
 		ui.alertsRoot.Visible = true
 	end
@@ -1016,8 +937,6 @@ function RuntimeHelpers.bindExistingUI()
 	ButtonUi.prepare(ui.hintButton)
 	ButtonUi.prepare(ui.nextButton, COLORS.buttonPrimary)
 	ButtonUi.prepare(ui.exitButton, nil, 0)
-	ButtonUi.prepare(ui.timeBoostButton)
-	ButtonUi.prepare(ui.freezeTimeButton)
 	ButtonUi.prepare(ui.summaryButton, COLORS.buttonPrimary)
 
 	if ui.wordListScroll then

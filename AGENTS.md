@@ -2,132 +2,86 @@
 
 These instructions apply to the entire repository.
 
-## Published-version reconciliation gate (2026-09-04)
+## Current source authority (2026-09-04)
 
-- The user has reverted the Roblox Studio place to the currently published version, but that exact Studio source and its authored instances have not yet been synchronized into this checkout.
-- Do not treat the current worktree, `README.md`, or `src/REVAMP_HANDOFF.md` as proof of what is live. The worktree still contains a large, unfinished 1,000-level modular-UI redesign layered over the tracked unpublished revamp.
-- Git commit `a66ebf8` (`checkpoint: pre-revamp source`) is the strongest repository candidate for the published code, but it remains a comparison snapshot until checked against the restored Studio hierarchy and scripts.
-- Before changing gameplay, UI, persistence, remotes, monetization, or content, first export or synchronize the restored Studio source, inspect the exact hierarchy/casing, and update this file plus the README/handoff to match it.
-- Do not reset, check out, delete, publish, or copy either the dirty redesign worktree or `a66ebf8` into Studio without the user's explicit choice. Preserve both for reconciliation.
-- Runtime Studio hierarchy and fresh Server/Client Output override all repository assumptions. Clearly distinguish source inspection from Studio and published-place validation.
+- The user explicitly selected the current `src/` tree as the source to change.
+- This checkout is the 150-board Word Hunt implementation, not the unfinished 1,000-level modular revamp previously described here.
+- `README.md` and `src/REVAMP_HANDOFF.md` still describe that different revamp and are historical references only. Do not use them to infer current files, remotes, persistence, modes, UI, or release state.
+- Make repository changes only unless the user explicitly asks for Roblox Studio synchronization or publishing. Never claim a source edit has been tested in Studio or in the published place without direct evidence.
+- Preserve unrelated dirty-worktree changes and Studio-authored assets that are not represented in this repository.
 
-The revamp-specific rules below are conditional guidance for the local revamp source. They do not currently describe the confirmed published game.
+## Repository and runtime boundaries
 
-## Start here
-
-- Read `README.md` and `src/REVAMP_HANDOFF.md` before modifying gameplay, persistence, remotes, UI structure, or level content.
-- Once the reconciliation gate above is cleared, treat the selected synchronized source as authoritative rather than an older handoff or redesign draft.
-- Preserve unrelated working-tree changes and keep separate private backups of the Roblox place. This repository does not contain every Studio-authored asset.
-
-## Runtime boundary and mapping
-
-- This checkout has no Rojo project. Do not add Rojo, Wally, Rokit, or generated place configuration unless the workflow is intentionally changed.
-- Map `src/client` to `StarterPlayerScripts.client`, `src/server` to `ServerScriptService.server`, and `src/shared` to lowercase `ReplicatedStorage.shared`.
+- This checkout has no Rojo project. Do not introduce Rojo, Wally, Rokit, generated places, or dependency lock files unless the workflow is intentionally changed.
+- Preserve exact folder names and casing. Shared imports expect lowercase `ReplicatedStorage.shared`.
+- `GameController.local.luau` currently refuses to run when it is a descendant of `StarterPlayerScripts`. Do not relocate the active LocalScript or guess the live hierarchy without inspecting the synchronized Studio place.
+- The client chooses `ReplicatedStorage.Interfaces.Desktop` or `Mobile`, clones it to `PlayerGui.HUD`, and then binds the authored hierarchy. Do not add a second HUD.
 - Keep exactly one active `GameController` LocalScript and one `ServerBootstrap` Script.
-- The server creates `ReplicatedStorage.WordSearchRevampRemotes`; clients must not create fallback or shadow remotes.
-- The client creates `WordSearchUI` at runtime. Do not enable an old authored HUD or the retired `WordSearchRevampHUD` alongside it.
+- The server creates `ReplicatedStorage.WordSearchBackendRemotes` plus the legacy-compatible `ReplicatedStorage.Remotes.Events` and `Functions` endpoints.
 
 ## Current architecture
 
-- `src/client/GameController.local.luau`
-  Client entrypoint. Loads shared configuration, binds remotes, owns view state, and coordinates the scripted UI, input, audio, animation, and environment controllers.
-- `src/client/ui/AppController.luau`
-  Composes the complete `WordSearchUI`, registers screens and modal flows, applies accessibility/cosmetic presentation, and preserves the public UI contract consumed by `GameController` and `InputController`.
-- `src/client/ui/Screens/`
-  Purpose-built modules for loading, home, Classic/chapter/level selection, Daily, gameplay, tutorial, achievements, shop, settings, pause, confirmation, victory, and errors.
-- `src/client/ui/Components/`
-  Reusable top bar, navigation drawer, puzzle board, word list, action toolbar, mode/chapter/level cards, progress, star, modal, and tooltip components.
-- `src/client/ui/Theme.luau`, `Assets.luau`, `ResponsiveController.luau`, `ScreenRouter.luau`, and `ModalController.luau`
-  Central visual tokens and real image-asset slots, safe-area layouts, page focus, and single-modal routing.
-- `src/client/revamp/InputController.luau`
-  Handles mouse, touch, keyboard, and gamepad selection. Pointer work is sampled only during an active gesture.
-- `src/client/revamp/AnimationController.luau`
-  Cancellable UI tweens and reduced-motion behavior.
-- `src/client/revamp/AudioController.luau`
-  Configured sound assets and fallback sounds under `SoundService`.
-- `src/client/revamp/EnvironmentController.luau`
-  Client-only camera and atmosphere treatment with teardown restoration.
-- `src/server/bootstrap/ServerBootstrap.server.luau`
-  Server entrypoint. Creates remotes, validates requests, applies rate limits, loads profiles, wires round/economy endpoints, and starts Studio tests.
-- `src/server/content/LevelCatalog.luau`
-  Server-only six-chapter, 1,000-level catalog. It owns authored definitions, themed word banks, and deterministic expansion rules.
-- `src/server/puzzle/PuzzleGenerator.luau` and `PuzzleValidator.luau`
-  Deterministic generation, path compilation, occurrence checks, and definition validation.
-- `src/server/services/gameplay/PuzzleService.luau`
-  Resolves Classic, Quick, Daily, and Zen requests and returns sanitized public puzzles.
-- `src/server/services/gameplay/RoundService.luau`
-  Owns active rounds, canonical paths, selection checks, hints, pause state, completion, and per-round action serialization.
-- `src/server/services/gameplay/RewardService.luau`
-  Calculates ranked eligibility, stars, XP, coins, achievements, and daily completion rewards before applying them through `DataService`.
-- `src/server/data/DataService.luau`
-  Sole persistent profile owner. Handles normalization, leased sessions, idempotent receipts, autosave, release, and snapshots.
-- `src/server/data/EconomyProfile.luau`
-  Pure profile mutations performed while `DataService` owns the profile lock.
-- `src/server/services/meta/DailyPuzzleService.luau`
-  Stable UTC daily identity, reset timing, and streak rules.
-- `src/server/services/meta/EconomyService.luau`
-  Server-side catalog resolution, daily-login claims, coin purchases, and cosmetic equips.
-- `src/server/services/ops/RateLimiter.luau` and `src/server/utils/RemoteValidator.luau`
-  Per-player endpoint throttles and bounded remote payload schemas.
-- `src/server/tests/PuzzleEngineTests.luau`
-  Static content and engine coverage, including all 1,000 levels and deterministic fixtures.
-- `src/shared/config/GameConfig.luau`
-  Schema/content/generator revisions, datastore name, gameplay bounds, progression, modes, achievements, and asset placeholders.
-- `src/shared/config/RemoteConfig.luau` and `ShopConfig.luau`
-  Remote names and the server-readable coin/cosmetic catalog.
+- `src/client/GameController.local.luau`: client entrypoint, shared state, modes, remote bootstrap, view flow, audio, and controller composition.
+- `src/client/gameplay/BoardRuntime.luau`: deterministic local board rendering, selection input, hints, animations, resume flow, scoring preview, completion, and Duel presentation.
+- `src/client/gameplay/ClassicLevels.luau`: Classic level selector state and rendering helpers.
+- `src/client/ui/`: bindings for the authored Desktop/Mobile HUD, menus, summaries, meta screens, playtime rewards, and Duel UI.
+- `src/client/input/InputBindings.luau`: mouse, touch, and gamepad drag lifecycle.
+- `src/server/bootstrap/ServerBootstrap.server.luau`: server entrypoint, remotes, receipts, lifecycle, and service wiring.
+- `src/server/services/gameplay/BoardValidationService.luau`: regenerates boards server-side and validates word paths, hints, resumable state, and clears.
+- `src/server/services/gameplay/ProgressionService.luau`: applies validated words, outcomes, stars, puzzle-piece rewards, and progression.
+- `src/server/services/gameplay/DuelService.luau`: matchmaking and competitive race lifecycle.
+- `src/server/data/PlayerDataStore.luau`: sole persistent-data owner, normalization, snapshots, session ownership, and saving.
+- `src/server/services/meta/`: hints, daily/group/gift rewards, playtime rewards, and leaderboards.
+- `src/shared/content/Levels.luau`: deterministic 150-board Classic catalog generated across six difficulty packs.
+- `src/shared/board/`: shared definition and board generation used independently by client and server.
+- `src/shared/progression/StarRules.luau`: durable per-board star-slot resolution and hint-based star awards.
+- `src/shared/config/`: remote names, hint products, puzzle-piece economy, and playtime-reward configuration.
 
-## Authority and security invariants
+## Normal-puzzle timer policy
 
-- Keep canonical puzzle targets and paths server-only. Never send them to a client before an authorized hint or terminal result requires a sanitized reveal.
-- The server owns round IDs, seeds, timers, pause state, found targets, completion, stars, XP, coins, hints, achievements, unlocks, and economy mutations.
-- A client submits only bounded intent such as a mode/level request or two selection endpoints. Continue validating payload shape with `RemoteValidator`, throttling with `RateLimiter`, and matching against `RoundService` state.
-- Keep round-wide action serialization so selection, hint, pause, and completion writes cannot overlap.
-- Preserve idempotent completion and shop receipts, including the ambiguous-`UpdateAsync` retry path.
-- Keep implausibly fast or excessive clears unranked. Do not grant progression when `RewardService` rejects ranked eligibility.
-- Disabled Developer Product placeholders are not a receipt implementation. Do not enable Robux products until real IDs and idempotent `ProcessReceipt` handling exist.
-- Never commit credentials, tokens, webhook URLs, local place files, or production data exports.
+- Classic, Themed, Freeplay, Backwards, Fog, OneLife, Mega, and Daily are untimed. A player never loses, earns fewer rewards, or receives fewer stars because they solve slowly.
+- Do not restore a countdown-to-loss, time extension, timer freeze, speed multiplier, speed-based star threshold, or speed-based puzzle-piece bonus to normal puzzles.
+- Do not sell gameplay time. The retired +2 Minutes and Freeze Timer Developer Product IDs must never be prompted by the client or exposed as usable inventory.
+- Data version 11 converts each retired timer item into one hint once, removes the retired fields from snapshots and player mirrors, and keeps a server-only receipt compatibility mapping so already-paid pending receipts can settle as hints.
+- The short 3-2-1 board-introduction animation is presentation, not a solve deadline. Daily reset countdowns and playtime reward countdowns are meta systems. Duel may measure race duration because players compete on the same board.
+- Internal clear duration may be retained for anti-abuse diagnostics and aggregate analytics, but must not influence normal-puzzle wins, stars, score, or puzzle-piece rewards.
 
-## Persistence rules
+## Stars and progression
 
-- The current production store is `WordSearchRevamp_v1`, schema version 1, keyed with `player_<UserId>`.
-- Studio profiles are deliberately memory-only. Do not make Studio read or overwrite production data as a convenience.
-- `DataService` is the only module that may own persistence, profile normalization, session leases, dirty state, save retries, and snapshots.
-- Keep player mirrors synchronized through `DataService`; do not mutate snapshot tables on the client and treat them as saved state.
-- Preserve leased-session ownership, mutation locking, capped retries, release-request behavior, 60-second autosave, `PlayerRemoving`, and the bounded `BindToClose` budget.
-- When changing saved data, update defaults, normalization, snapshot construction, mirrors, limits, and tests together. Change `SchemaVersion` only with an intentional migration plan.
-- Do not read, overwrite, or delete an older datastore without explicit migration requirements and published-environment validation.
+- A completed normal board awards 3 stars with no hints, 2 stars with one hint, and 1 star with two or more hints.
+- An incomplete or lost board awards 0 stars. OneLife may still record a loss after an invalid selection.
+- Star progress stores the best result for each mode/pack/entry slot. Update client preview and server authority together whenever star rules change.
+- Classic contains 150 sequential boards. Board 1 is an intentional onboarding board and must remain exactly two familiar words, `CAT` and `DOG`, on a 4x4 grid with only eastward placement.
+- Every board after Board 1 continues to use the tier generator unless the content design is changed intentionally.
+- Server validation regenerates the expected board and checks the claimed word path. Never trust a client-reported clear, hint use, reward, star count, or progression value.
 
-## Gameplay and content rules
+## Persistence and receipts
 
-- Current modes are Classic, Quick, Daily, and Zen. Zen is server-supported but intentionally hidden from the main menu; Time Attack is not implemented.
-- Classic has 1,000 levels in six chapters. Unlock order and best stars/times are durable progression.
-- Every normal play generates a fresh server-owned seed. A seed remains deterministic for debugging, but replay must not reuse a completion identity.
-- Daily word-list identity is pinned by `GameConfig.DailyRotation`, independent of `ContentRevision`. Schedule rotation changes just after UTC rollover so mixed live servers cannot split the day's challenge.
-- Keep `GameConfig.ContentRevision`, `GeneratorVersion`, catalog definitions, daily rotation, and pinned test hashes consistent. Revision changes deliberately invalidate incompatible in-flight rounds.
-- For new levels, use stable lowercase IDs, valid chapter/order metadata, bounded grids/words, and a supported difficulty. Authored targets must match their words and may not duplicate the same physical path in reverse.
-- Update puzzle generation and server validation together. Never implement a generation rule only in the client.
-- The shop spends saved coins, and its daily-login claim and cosmetic equip actions are wired into dedicated client screens. Keep those mutations server-authoritative.
+- Production persistence uses `WordSearchData_v1`, keyed as `player_<UserId>`; the current data version is 11.
+- `PlayerDataStore` alone owns load, normalization, snapshots, session tokens, saves, releases, and player data mirrors.
+- When changing saved data, update defaults, normalization/migration, snapshots, mirrors, and all readers together.
+- Preserve processed-receipt idempotency. Unknown Developer Product receipts must remain retryable; supported hint products and retired-product conversions must mark a receipt only after applying the grant.
+- Do not read, overwrite, delete, or migrate production data outside the explicit migration code without the user's approval.
 
-## Client and accessibility rules
+## Gameplay and security
 
-- Review mouse, touch, keyboard, and gamepad paths together for any input or focus change.
-- Preserve arithmetic board hit-testing, active-gesture-only pointer sampling, cached cell geometry, and centralized input enable/disable behavior.
-- Keep selection previews presentation-only; the client must not infer or award a valid word.
-- Use `GuiButton.Activated` for mouse, touch, and controller parity, and preserve visible gamepad focus.
-- Maintain phone portrait/landscape, tablet, desktop, ultrawide, and console safe-area layouts with readable cells and at least 48-pixel primary controls where practical.
-- Honor reduced motion, high contrast, colorblind mode, music/SFX toggles, and volume settings. Environment teardown must restore the prior camera and lighting state it owns.
-- Asset IDs in `GameConfig.Assets` may remain empty. Missing optional art/audio should degrade safely and warn at most once.
+- Supported modes are Classic, Themed, Freeplay, Backwards, Fog, OneLife, Mega, Daily, and Duel.
+- Board definitions and generation code replicate to the client for presentation, but server validation independently rebuilds the board and validates exact paths before progression.
+- Keep remote action allowlists and throttles server-side. A client sends bounded intent; the server owns hints, clears, stars, puzzle pieces, progression, Daily completion, Duel results, and receipts.
+- Keep Daily identity deterministic and reject stale Daily resume state after rollover.
+- Never commit credentials, webhook secrets, production exports, local place files, or certificates.
+
+## Client and accessibility
+
+- Review mouse, touch, keyboard, and gamepad behavior together for input or focus changes.
+- Preserve arithmetic cell hit-testing, active-gesture input tracking, board path visuals, and centralized interaction locks.
+- Use `GuiButton.Activated` for cross-device actions.
+- Preserve Desktop/Mobile template selection and validate both orientations and controller focus in Studio after UI changes.
+- Optional UI or sound instances must degrade safely when missing.
 
 ## Validation and release claims
 
-- Run `require(game.ServerScriptService.server.tests.PuzzleEngineTests).Run()` in Studio after content, generator, validator, economy, or remote-schema changes. The server bootstrap also runs it automatically in Studio.
-- Inspect changes for merge markers, credentials, unexpected binary place files, malformed level data, and client/server contract drift.
-- Use Studio Script Analysis and inspect both Server and Client Output.
-- Before release, test with at least two clients: all input types, every visible mode, Daily rollover, hints, pause/replay/next, settings, tutorial, respawn/leave, rate limiting, DataStore denial, receipt replay, autosave, and shutdown.
-- Clearly distinguish source/static validation from Roblox Studio and published-place validation. Source tests cannot prove Studio hierarchy, assets, streaming, DataStores, device layout, or live service behavior.
-
-## Repository hygiene
-
-- Keep repository files under `src/` plus `README.md`, `AGENTS.md`, `.gitignore`, `.gitattributes`, and intentional `.github/` files.
-- Do not commit `.rbxl`, `.rbxlx`, lock files, logs, editor state, temporary files, environment files, keys, or certificates.
-- Preserve LF endings for Lua/Luau/Markdown and CRLF for PowerShell through `.gitattributes`.
+- Run available local syntax/static checks after Luau edits and inspect changed files for stale imports, deleted-module references, merge markers, credentials, and client/server contract drift.
+- This source currently has no checked-in automated Studio test suite. Validation in this checkout is static unless a Studio session is actually run.
+- Before publishing, test both Server and Client Output and cover: Board 1 onboarding, Board 2 progression, resume/exit, all normal modes without timer UI or timeout, hint-based stars, hint purchases, retired-item migration, pending retired receipts, Daily rollover, OneLife loss, Duel, playtime rewards, admin reset, DataStore failures, respawn, and shutdown saving.
+- Clearly distinguish source validation from Roblox Studio and published-place validation.

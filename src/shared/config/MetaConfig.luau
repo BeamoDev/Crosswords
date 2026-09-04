@@ -20,11 +20,6 @@ MetaConfig.HINT_PRODUCT_IDS = {
 	[25] = 3573028459,
 }
 
-MetaConfig.TIMED_PRODUCT_IDS = {
-	TimeBoost = 3573028604,
-	FreezeTime = 3573028785,
-}
-
 MetaConfig.DAILY_REWARD = {
 	BaseXp = 0,
 	StepXp = 0,

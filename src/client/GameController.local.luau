@@ -1,4 +1,3 @@
-local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -26,7 +25,6 @@ local BoardRuntimeModule = require(script.Parent:WaitForChild("gameplay"):WaitFo
 local SummaryRuntimeModule = require(script.Parent:WaitForChild("ui"):WaitForChild("SummaryRuntime"))
 local UiBootstrapRuntimeModule = require(script.Parent:WaitForChild("ui"):WaitForChild("UiBootstrapRuntime"))
 local ClassicLevels = require(script.Parent:WaitForChild("gameplay"):WaitForChild("ClassicLevels"))
-local TimedProductRuntime = require(script.Parent:WaitForChild("gameplay"):WaitForChild("TimedProductRuntime"))
 local GuiUtils = require(script.Parent:WaitForChild("ui"):WaitForChild("GuiUtils"))
 local ViewTransitions = require(script.Parent:WaitForChild("ui"):WaitForChild("ViewTransitions"))
 local ButtonUiModule = require(script.Parent:WaitForChild("ui"):WaitForChild("ButtonUI"))
@@ -39,13 +37,8 @@ local findTextObject = GuiUtils.findTextObject
 local ensureScaleController = GuiUtils.ensureScaleController
 local findButtonLike = GuiUtils.findButtonLike
 local findFirstPath = GuiUtils.findFirstPath
-local findBarContainer = GuiUtils.findBarContainer
-local setBarFillAlpha = GuiUtils.setBarFillAlpha
 local tween
 local bindButtonHoverSound
-local warningOverlayHeartbeatToken = 0
-local warningOverlayHeartbeatRunning = false
-
 local DEFAULT_CONFIGS = {
 	Meta = {
 		DEFAULTS = {
@@ -55,10 +48,6 @@ local DEFAULT_CONFIGS = {
 				Music = true,
 			},
 		},
-		TIMED_PRODUCT_IDS = {
-			TimeBoost = 3573028604,
-			FreezeTime = 3573028785,
-		},
 	},
 	Remote = {
 		FolderName = "WordSearchBackendRemotes",
@@ -66,7 +55,6 @@ local DEFAULT_CONFIGS = {
 		TrackAction = "TrackAction",
 		StateUpdated = "StateUpdated",
 		UseHint = "UseHint",
-		UseTimedProduct = "UseTimedProduct",
 	},
 }
 local MODE_RESULT_NAMES = {
@@ -231,7 +219,6 @@ local Dependencies = {
 	DailyMode = require(sharedFolder:WaitForChild("progression"):WaitForChild("DailyMode")),
 	GiftProgress = require(sharedFolder:WaitForChild("progression"):WaitForChild("GiftProgress")),
 	StarRules = require(sharedFolder:WaitForChild("progression"):WaitForChild("StarRules")),
-	TimerRules = require(sharedFolder:WaitForChild("progression"):WaitForChild("TimerRules")),
 	PuzzleEconomy = require(sharedFolder:WaitForChild("config"):WaitForChild("PuzzleEconomy")),
 	UIEffects = require(sharedFolder:WaitForChild("ui"):WaitForChild("UIEffects")),
 	AutoRejoin = require(script.Parent:WaitForChild("system"):WaitForChild("AutoRejoin")),
@@ -384,13 +371,6 @@ local COLORS = {
 	error = Color3.fromRGB(255, 150, 150),
 }
 
-local TIMER_FLASH_COLORS = {
-	startRed = Color3.fromRGB(255, 108, 108),
-	startYellow = Color3.fromRGB(255, 220, 110),
-	startGreen = Color3.fromRGB(126, 232, 141),
-	low = Color3.fromRGB(255, 92, 92),
-}
-
 local WORD_LINE_COLORS = {
 	Color3.fromRGB(142, 234, 88),
 	Color3.fromRGB(184, 132, 255),
@@ -516,7 +496,6 @@ local MODES = {
 		wordMultiplier = 1,
 		completionBonus = 120,
 		rewardScale = 1,
-		startTime = 1,
 		loop = false,
 	},
 	Themed = {
@@ -528,7 +507,6 @@ local MODES = {
 		wordMultiplier = 1.1,
 		completionBonus = 138,
 		rewardScale = 1.1,
-		startTime = 1,
 		loop = true,
 	},
 	Freeplay = {
@@ -541,7 +519,6 @@ local MODES = {
 		wordMultiplier = 1.2,
 		completionBonus = 150,
 		rewardScale = 1.15,
-		startTime = 1,
 		loop = true,
 	},
 	Backwards = {
@@ -554,7 +531,6 @@ local MODES = {
 		wordMultiplier = 1.25,
 		completionBonus = 165,
 		rewardScale = 1.2,
-		startTime = 1,
 		loop = true,
 	},
 	Fog = {
@@ -567,7 +543,6 @@ local MODES = {
 		wordMultiplier = 1.38,
 		completionBonus = 194,
 		rewardScale = 1.3,
-		startTime = 1,
 		loop = true,
 	},
 	OneLife = {
@@ -580,7 +555,6 @@ local MODES = {
 		wordMultiplier = 1.48,
 		completionBonus = 212,
 		rewardScale = 1.38,
-		startTime = 1,
 		loop = true,
 	},
 	Mega = {
@@ -593,7 +567,6 @@ local MODES = {
 		wordMultiplier = 1.95,
 		completionBonus = 340,
 		rewardScale = 1.92,
-		startTime = 1,
 		loop = true,
 	},
 	Daily = {
@@ -606,7 +579,6 @@ local MODES = {
 		wordMultiplier = 2.1,
 		completionBonus = 360,
 		rewardScale = 2,
-		startTime = 1,
 		loop = false,
 	},
 	Duel = {
@@ -655,8 +627,6 @@ local LAYOUT = {
 	},
 	FoundLineTransparency = 0.2,
 	HintLineTransparency = 0.4,
-	TimedComboWindowSeconds = 8,
-	TimedComboMaxMultiplier = 5,
 	LineLayerZIndex = 1,
 	PersistentLineLayerZIndex = 1,
 	PersistentLineGlowZIndex = 1,
@@ -759,32 +729,12 @@ state = {
 	sessionScore = 0,
 	totalStars = 0,
 	availableHints = Dependencies.MetaConfig.DEFAULTS.StartingHints,
-	availableTimeBoosts = 0,
-	availableFreezeTime = 0,
 	puzzlesCleared = 0,
 	streak = 0,
 	currentBoardHintUses = 0,
 	boardStartedAt = 0,
 	lastFoundAt = 0,
 	wrongDragCount = 0,
-	timedDeadline = 0,
-	timedStartTick = 0,
-	timedOriginalDurationSeconds = 0,
-	timedDurationSeconds = 0,
-	timedSecondsLeft = 0,
-	lastTimerWholeSecond = nil,
-	timedStartCueEndsAt = 0,
-	timedTimerVisualKey = "",
-	timedCountdownPending = false,
-	timedRunActive = false,
-	timedRunEnding = false,
-	timeBoostUsed = false,
-	freezeTimeUsed = false,
-	freezeTimeEndsAt = 0,
-	timedComboMultiplier = 1,
-	timedComboExpiresAt = 0,
-	timedComboPausedRemaining = 0,
-	timedComboAccent = nil,
 	gameplayInputLocked = false,
 	wordRowsRevealPending = false,
 	gameEnded = false,
@@ -792,7 +742,6 @@ state = {
 	viewTransitionBusy = false,
 	gameViewActive = false,
 	pendingHintRequest = false,
-	pendingTimedProductKind = nil,
 	menuModeIndex = 1,
 	summaryAction = nil,
 	summaryOutcomeContext = nil,
@@ -804,7 +753,6 @@ state = {
 	hintAttentionActive = false,
 	hintAttentionNextPulseAt = 0,
 	hintAttentionTweenToken = 0,
-	moreTimeDebugKey = "",
 	summaryGiftDebugKey = "",
 	playerData = nil,
 	starProgress = {},
@@ -851,7 +799,6 @@ local updateWordsLabel
 local transitionToPuzzle
 local performPuzzleLoad
 local loadPreparedPuzzle
-local endTimedRun
 local showSummary
 local hideSummary
 local enterSelectedMode
@@ -864,7 +811,6 @@ local tileFromScreenPosition
 local startMode
 local syncBoardProgress
 local showMenuView
-local TimedProduct = {}
 local showGameView
 local countHintedWords
 local countFoundWords
@@ -1190,7 +1136,6 @@ RuntimeHelpers.updateHintAttentionPulse = function()
 		and state.currentPuzzle ~= nil
 		and not state.duelActive
 		and not state.gameEnded
-		and not state.timedCountdownPending
 		and state.availableHints > 0
 		and getModeConfig().disableHints ~= true
 		and hintVisible
@@ -1489,9 +1434,6 @@ local function refreshViewportLayout()
 	if RuntimeHelpers.refreshDuelModeUi then
 		RuntimeHelpers.refreshDuelModeUi()
 	end
-	if RuntimeHelpers.refreshTimedComboUi then
-		RuntimeHelpers.refreshTimedComboUi()
-	end
 	if RuntimeHelpers.refreshHintButtonLayout then
 		RuntimeHelpers.refreshHintButtonLayout()
 	end
@@ -1519,453 +1461,6 @@ local function refreshViewportLayout()
 	end
 end
 
-RuntimeHelpers.getTimedSecondsRemaining = function()
-	if not getModeConfig().startTime then
-		return 0
-	end
-
-	if state.timedRunActive and state.timedDeadline > 0 then
-		return math.max(0, state.timedDeadline - tick())
-	end
-
-	return math.max(0, tonumber(state.timedSecondsLeft) or 0)
-end
-
-RuntimeHelpers.getTimedLowTimeThreshold = function()
-	local duration = math.max(0, math.floor(tonumber(state.timedDurationSeconds or state.timedOriginalDurationSeconds) or 0))
-	if duration <= 0 then
-		return 0
-	end
-
-	return math.max(1, math.ceil(duration * 0.1))
-end
-
-RuntimeHelpers.getTimedWarningThreshold = function()
-	local duration = math.max(0, math.floor(tonumber(state.timedDurationSeconds or state.timedOriginalDurationSeconds) or 0))
-	if duration <= 0 then
-		return 0
-	end
-
-	return math.max(1, math.ceil(duration * 0.25))
-end
-
-RuntimeHelpers.getWarningOverlay = function()
-	local warningImage = ui.warningImage
-	if warningImage and (warningImage:IsA("ImageLabel") or warningImage:IsA("ImageButton")) then
-		return warningImage
-	end
-
-	return nil
-end
-
-RuntimeHelpers.shouldShowTimedWarningOverlay = function()
-	if not (
-		isGameViewDisplayed()
-		and not state.duelActive
-		and getModeConfig().startTime ~= nil
-		and state.timedRunActive == true
-		and state.timedCountdownPending ~= true
-		and state.gameEnded ~= true
-	) then
-		return false
-	end
-
-	local remaining = math.max(0, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-	local warningThreshold = RuntimeHelpers.getTimedWarningThreshold()
-	return remaining > 0 and remaining <= warningThreshold
-end
-
-RuntimeHelpers.isTimedWarningActive = function()
-	return RuntimeHelpers.shouldShowTimedWarningOverlay() == true
-end
-
-RuntimeHelpers.shouldShowMoreTimeButton = function()
-	if not (
-		isGameViewDisplayed()
-		and state.currentPuzzle ~= nil
-		and not state.duelActive
-		and getModeConfig().startTime ~= nil
-		and state.timedRunActive == true
-		and state.timedCountdownPending ~= true
-		and state.gameEnded ~= true
-	) then
-		return false
-	end
-
-	local duration = math.max(1, math.floor(tonumber(state.timedDurationSeconds or state.timedOriginalDurationSeconds) or 1))
-	local remaining = math.max(0, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-	local threshold = math.max(
-		math.ceil(duration / 3),
-		RuntimeHelpers.getTimedWarningThreshold()
-	)
-	return remaining > 0 and remaining <= threshold
-end
-
-RuntimeHelpers.setTimedWarningOverlayEnabled = function(enabled)
-	local warningImage = RuntimeHelpers.getWarningOverlay()
-	if enabled == true and warningOverlayHeartbeatRunning == true then
-		if warningImage and warningImage.Parent then
-			warningImage.Visible = true
-		end
-		return
-	end
-
-	warningOverlayHeartbeatToken += 1
-	local heartbeatToken = warningOverlayHeartbeatToken
-	warningOverlayHeartbeatRunning = false
-
-	if not warningImage then
-		return
-	end
-
-	local warningScale = ui.warningImageScale
-	local activeAnimations = ui.warningOverlayAnimations
-	if type(activeAnimations) == "table" then
-		for _, animation in ipairs(activeAnimations) do
-			if typeof(animation) == "Instance" then
-				pcall(function()
-					animation:Cancel()
-				end)
-			end
-		end
-	end
-	ui.warningOverlayAnimations = {}
-	warningImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
-	warningImage.ImageTransparency = 1
-	if warningScale then
-		warningScale.Scale = 1
-	end
-	if enabled ~= true then
-		warningImage.Visible = false
-		return
-	end
-
-	warningImage.Visible = true
-	warningOverlayHeartbeatRunning = true
-	if enabled == true then
-		local remaining = math.max(0, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-		local warningThreshold = math.max(1, RuntimeHelpers.getTimedWarningThreshold())
-		local moreTimeVisible = RuntimeHelpers.shouldShowMoreTimeButton()
-		print(string.format(
-			"[WordSearch MoreTime] warning_start remaining=%d warningThreshold=%d shouldShow=%s root=%s button=%s used=%s runActive=%s countdown=%s",
-			remaining,
-			warningThreshold,
-			tostring(moreTimeVisible),
-			tostring(ui.timeBoostRoot and ui.timeBoostRoot:GetFullName() or "nil"),
-			tostring(ui.timeBoostButton and ui.timeBoostButton:GetFullName() or "nil"),
-			tostring(state.timeBoostUsed == true),
-			tostring(state.timedRunActive == true),
-			tostring(state.timedCountdownPending == true)
-		))
-	end
-
-	task.spawn(function()
-		while heartbeatToken == warningOverlayHeartbeatToken do
-			if not (
-				warningImage
-				and warningImage.Parent
-				and RuntimeHelpers.shouldShowTimedWarningOverlay()
-			) then
-				break
-			end
-
-			local remaining = math.max(0, RuntimeHelpers.getTimedSecondsRemaining())
-			local warningThreshold = math.max(1, RuntimeHelpers.getTimedWarningThreshold())
-			local urgency = 1 - math.clamp(remaining / warningThreshold, 0, 1)
-			local tint = Color3.fromRGB(
-				255,
-				math.floor(242 - (urgency * 54)),
-				math.floor(234 - (urgency * 86))
-			)
-			local settleTint = Color3.fromRGB(
-				255,
-				math.floor(248 - (urgency * 24)),
-				math.floor(244 - (urgency * 34))
-			)
-			local peakTransparency = math.clamp(0.52 - (urgency * 0.16), 0.24, 0.52)
-			local firstReleaseTransparency = math.clamp(peakTransparency + 0.16, peakTransparency + 0.1, 0.72)
-			local secondPeakTransparency = math.clamp(peakTransparency + 0.06, peakTransparency, 0.64)
-			local settleTransparency = math.clamp(0.84 - (urgency * 0.12), secondPeakTransparency + 0.12, 0.9)
-			local firstPeakScale = 1.04 + (urgency * 0.06)
-			local firstReleaseScale = 1.015 + (urgency * 0.02)
-			local secondPeakScale = 1.025 + (urgency * 0.04)
-			local settleScale = 1 + (urgency * 0.012)
-			local firstBeatDuration = math.max(0.2, 0.28 - (urgency * 0.04))
-			local firstReleaseDuration = math.max(0.16, 0.22 - (urgency * 0.03))
-			local secondBeatDuration = math.max(0.14, 0.18 - (urgency * 0.03))
-			local settleDuration = math.max(0.46, 0.78 - (urgency * 0.1))
-			warningImage.Visible = true
-			warningImage.ImageColor3 = settleTint
-
-			local phaseOneTween = tween(warningImage, {
-				ImageTransparency = peakTransparency,
-				ImageColor3 = tint,
-			}, TweenInfo.new(firstBeatDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out))
-			if phaseOneTween then
-				table.insert(ui.warningOverlayAnimations, phaseOneTween)
-			end
-			if warningScale then
-				local scaleTween = tween(warningScale, {
-					Scale = firstPeakScale,
-				}, TweenInfo.new(firstBeatDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out))
-				if scaleTween then
-					table.insert(ui.warningOverlayAnimations, scaleTween)
-				end
-			end
-			task.wait(firstBeatDuration)
-			if heartbeatToken ~= warningOverlayHeartbeatToken or not RuntimeHelpers.shouldShowTimedWarningOverlay() then
-				break
-			end
-
-			local phaseTwoTween = tween(warningImage, {
-				ImageTransparency = firstReleaseTransparency,
-			}, TweenInfo.new(firstReleaseDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out))
-			if phaseTwoTween then
-				table.insert(ui.warningOverlayAnimations, phaseTwoTween)
-			end
-			if warningScale then
-				local scaleTween = tween(warningScale, {
-					Scale = firstReleaseScale,
-				}, TweenInfo.new(firstReleaseDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out))
-				if scaleTween then
-					table.insert(ui.warningOverlayAnimations, scaleTween)
-				end
-			end
-			task.wait(firstReleaseDuration)
-			if heartbeatToken ~= warningOverlayHeartbeatToken or not RuntimeHelpers.shouldShowTimedWarningOverlay() then
-				break
-			end
-
-			local phaseThreeTween = tween(warningImage, {
-				ImageTransparency = secondPeakTransparency,
-				ImageColor3 = tint,
-			}, TweenInfo.new(secondBeatDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out))
-			if phaseThreeTween then
-				table.insert(ui.warningOverlayAnimations, phaseThreeTween)
-			end
-			if warningScale then
-				local scaleTween = tween(warningScale, {
-					Scale = secondPeakScale,
-				}, TweenInfo.new(secondBeatDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out))
-				if scaleTween then
-					table.insert(ui.warningOverlayAnimations, scaleTween)
-				end
-			end
-			task.wait(secondBeatDuration)
-			if heartbeatToken ~= warningOverlayHeartbeatToken or not RuntimeHelpers.shouldShowTimedWarningOverlay() then
-				break
-			end
-
-			local phaseFourTween = tween(warningImage, {
-				ImageTransparency = settleTransparency,
-				ImageColor3 = settleTint,
-			}, TweenInfo.new(settleDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
-			if phaseFourTween then
-				table.insert(ui.warningOverlayAnimations, phaseFourTween)
-			end
-			if warningScale then
-				local scaleTween = tween(warningScale, {
-					Scale = settleScale,
-				}, TweenInfo.new(settleDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
-				if scaleTween then
-					table.insert(ui.warningOverlayAnimations, scaleTween)
-				end
-			end
-			task.wait(settleDuration)
-		end
-
-		if heartbeatToken == warningOverlayHeartbeatToken then
-			warningOverlayHeartbeatRunning = false
-			ui.warningOverlayAnimations = {}
-			if warningImage and warningImage.Parent then
-				warningImage.ImageTransparency = 1
-				warningImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
-				warningImage.Visible = false
-			end
-			if warningScale and warningScale.Parent then
-				warningScale.Scale = 1
-			end
-		end
-	end)
-end
-
-RuntimeHelpers.getTimedTimerVisualState = function()
-	local baseTextColor = ui.timedModeTimerLabelBaseColor or COLORS.text
-	local baseFrameColor = ui.timedModeFrameBaseColor or COLORS.chipSoft
-	local baseStrokeColor = ui.timedModeFrameStrokeBaseColor or baseFrameColor
-	local now = tick()
-	local startCueEndsAt = tonumber(state.timedStartCueEndsAt) or 0
-
-	if startCueEndsAt > now then
-		local elapsed = math.clamp(3 - (startCueEndsAt - now), 0, 2.999)
-		local stage = math.clamp(math.floor(elapsed) + 1, 1, 3)
-		local stageColor = stage == 1 and TIMER_FLASH_COLORS.startRed
-			or stage == 2 and TIMER_FLASH_COLORS.startYellow
-			or TIMER_FLASH_COLORS.startGreen
-
-		return {
-			key = "start_" .. tostring(stage),
-			textColor = stageColor,
-			frameColor = baseFrameColor:Lerp(stageColor, 0.32),
-			strokeColor = stageColor,
-			pulse = true,
-			pulsePeak = 1.14,
-		}
-	end
-
-	local lowThreshold = RuntimeHelpers.getTimedLowTimeThreshold()
-	local remaining = math.max(0, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-	if lowThreshold > 0 and remaining > 0 and remaining <= lowThreshold then
-		return {
-			key = "low_" .. tostring(remaining),
-			textColor = TIMER_FLASH_COLORS.low,
-			frameColor = baseFrameColor:Lerp(TIMER_FLASH_COLORS.low, 0.26),
-			strokeColor = TIMER_FLASH_COLORS.low,
-			pulse = true,
-			pulsePeak = 1.08,
-		}
-	end
-
-	return {
-		key = "base",
-		textColor = baseTextColor,
-		frameColor = baseFrameColor,
-		strokeColor = baseStrokeColor,
-		pulse = false,
-	}
-end
-
-RuntimeHelpers.applyTimedTimerVisual = function()
-	local label = ui.timedModeTimerLabel
-	local frame = ui.timedModeFrame
-	if not label then
-		return
-	end
-
-	local timedModeVisible = isGameViewDisplayed() and not state.duelActive and getModeConfig().startTime ~= nil
-	local baseTextColor = ui.timedModeTimerLabelBaseColor or COLORS.text
-	local baseFrameColor = ui.timedModeFrameBaseColor or COLORS.chipSoft
-	local baseStrokeColor = ui.timedModeFrameStrokeBaseColor or baseFrameColor
-
-	if not timedModeVisible then
-		state.timedTimerVisualKey = ""
-		RuntimeHelpers.setTimedWarningOverlayEnabled(false)
-		label.TextColor3 = baseTextColor
-		if frame and frame:IsA("GuiObject") then
-			frame.BackgroundColor3 = baseFrameColor
-		end
-		if ui.timedModeFrameStroke then
-			ui.timedModeFrameStroke.Color = baseStrokeColor
-		end
-		if ui.timedModeTimerScale then
-			ui.timedModeTimerScale.Scale = 1
-		end
-		return
-	end
-
-	RuntimeHelpers.setTimedWarningOverlayEnabled(RuntimeHelpers.shouldShowTimedWarningOverlay())
-
-	local visualState = RuntimeHelpers.getTimedTimerVisualState()
-	if state.timedTimerVisualKey == visualState.key then
-		return
-	end
-
-	state.timedTimerVisualKey = visualState.key
-	tween(label, {
-		TextColor3 = visualState.textColor,
-	}, 0.14)
-	if frame and frame:IsA("GuiObject") then
-		tween(frame, {
-			BackgroundColor3 = visualState.frameColor,
-		}, 0.14)
-	end
-	if ui.timedModeFrameStroke then
-		tween(ui.timedModeFrameStroke, {
-			Color = visualState.strokeColor,
-		}, 0.14)
-	end
-	if visualState.pulse and ui.timedModeTimerScale then
-		pulseScale(ui.timedModeTimerScale, visualState.pulsePeak or 1.08, 1, 0)
-	end
-end
-
-RuntimeHelpers.getTimedComboRemaining = function()
-	return 0
-end
-
-RuntimeHelpers.refreshTimedComboUi = function()
-	local comboRoot = ui.timedComboRoot
-	if not comboRoot then
-		return
-	end
-
-	if comboRoot:IsA("GuiObject") then
-		comboRoot.Visible = false
-	end
-	setBarFillAlpha(ui.timedComboBarFill, ui.timedComboBar, 0)
-end
-
-RuntimeHelpers.clearTimedCombo = function(syncProgress)
-	state.timedComboMultiplier = 1
-	state.timedComboExpiresAt = 0
-	state.timedComboPausedRemaining = 0
-	state.timedComboAccent = nil
-	RuntimeHelpers.refreshTimedComboUi()
-end
-
-RuntimeHelpers.playTimedComboEffect = function(color, comboMultiplier)
-end
-
-RuntimeHelpers.advanceTimedCombo = function(color)
-	return 1
-end
-
-RuntimeHelpers.pauseTimedModeForMenu = function()
-	if not getModeConfig().startTime or state.gameEnded then
-		return
-	end
-
-	local remaining = math.max(1, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-	state.timedRunActive = false
-	state.timedStartTick = 0
-	state.timedDeadline = 0
-	state.timedSecondsLeft = remaining
-	state.lastTimerWholeSecond = remaining
-	RuntimeHelpers.refreshTimedComboUi()
-end
-
-RuntimeHelpers.resumeTimedModeFromMenu = function()
-	if not getModeConfig().startTime or state.gameEnded then
-		return
-	end
-
-	if state.timedCountdownPending then
-		state.timedRunActive = false
-		state.timedStartTick = 0
-		state.timedDeadline = 0
-		state.gameplayInputLocked = true
-		state.lastTimerWholeSecond = math.max(1, math.floor(state.timedSecondsLeft or state.timedDurationSeconds or 0))
-		return
-	end
-
-	local remaining = math.max(1, math.floor(state.timedSecondsLeft or 0))
-	if (state.freezeTimeEndsAt or 0) > tick() then
-		state.timedRunActive = false
-		state.timedStartTick = 0
-		state.timedDeadline = 0
-		state.lastTimerWholeSecond = remaining
-		return
-	end
-
-	state.timedSecondsLeft = remaining
-	state.lastTimerWholeSecond = remaining
-	state.timedRunActive = true
-	state.timedStartTick = tick()
-	state.timedDeadline = state.timedStartTick + remaining
-	state.timedTimerVisualKey = ""
-	RuntimeHelpers.refreshTimedComboUi()
-end
-
 RuntimeHelpers.runCountdownLetterShuffle = function(countdownId)
 	task.spawn(function()
 		local shuffleStep = 0
@@ -1976,8 +1471,8 @@ RuntimeHelpers.runCountdownLetterShuffle = function(countdownId)
 				and state.currentPuzzle ~= nil
 				and ui.countdownFrame ~= nil
 				and ui.countdownFrame.Visible == true
-			if RuntimeHelpers and RuntimeHelpers.updateTimedLetterScatter then
-				RuntimeHelpers.updateTimedLetterScatter(shouldScramble, shuffleStep)
+			if RuntimeHelpers and RuntimeHelpers.updateCountdownLetterScatter then
+				RuntimeHelpers.updateCountdownLetterScatter(shouldScramble, shuffleStep)
 			end
 			if not shouldScramble then
 				break
@@ -1987,8 +1482,8 @@ RuntimeHelpers.runCountdownLetterShuffle = function(countdownId)
 			task.wait(0.18)
 		end
 
-		if RuntimeHelpers and RuntimeHelpers.updateTimedLetterScatter then
-			RuntimeHelpers.updateTimedLetterScatter(false)
+		if RuntimeHelpers and RuntimeHelpers.updateCountdownLetterScatter then
+			RuntimeHelpers.updateCountdownLetterScatter(false)
 		end
 	end)
 end
@@ -2060,8 +1555,8 @@ RuntimeHelpers.playCountdownSequence = function(countdownTime, finalText, onComp
 		end
 
 		tween(frame, { BackgroundTransparency = 1 }, ANIMATION.CountdownBackdropOut)
-		if RuntimeHelpers and RuntimeHelpers.updateTimedLetterScatter then
-			RuntimeHelpers.updateTimedLetterScatter(false)
+		if RuntimeHelpers and RuntimeHelpers.updateCountdownLetterScatter then
+			RuntimeHelpers.updateCountdownLetterScatter(false)
 		end
 		if onComplete then
 			onComplete()
@@ -2079,7 +1574,7 @@ RuntimeHelpers.playCountdownSequence = function(countdownTime, finalText, onComp
 	return true
 end
 
-RuntimeHelpers.beginTimedCountdownIfNeeded = function(boardToken)
+RuntimeHelpers.beginBoardCountdownIfNeeded = function(boardToken)
 	if not state.boardStartCountdownPending or state.gameEnded then
 		return
 	end
@@ -2096,18 +1591,6 @@ RuntimeHelpers.beginTimedCountdownIfNeeded = function(boardToken)
 	local function beginBoard()
 		if state.gameEnded or boardToken ~= state.boardToken then
 			return
-		end
-
-		if getModeConfig().startTime then
-			state.timedCountdownPending = false
-			state.timedRunActive = true
-			state.timedRunEnding = false
-			state.timedStartTick = tick()
-			state.timedDeadline = state.timedStartTick + math.max(1, math.floor(state.timedSecondsLeft or state.timedDurationSeconds or 1))
-			state.timedSecondsLeft = math.max(1, math.ceil(math.max(0, state.timedDeadline - state.timedStartTick)))
-			state.lastTimerWholeSecond = state.timedSecondsLeft
-			state.timedStartCueEndsAt = tick() + 3
-			state.timedTimerVisualKey = ""
 		end
 
 		state.wordRowsRevealPending = false
@@ -2194,8 +1677,6 @@ function RuntimeHelpers.createFallbackSnapshot()
 		},
 		inventory = {
 			hintsAvailable = state.availableHints,
-			timeBoostsAvailable = state.availableTimeBoosts or 0,
-			freezeTimeAvailable = state.availableFreezeTime or 0,
 			puzzlePieces = 0,
 		},
 		progression = {
@@ -2230,13 +1711,6 @@ function RuntimeHelpers.createFallbackSnapshot()
 	}
 end
 
-function RuntimeHelpers.formatTime(seconds)
-	local whole = math.max(0, math.ceil(seconds))
-	local minutes = math.floor(whole / 60)
-	local remainingSeconds = whole % 60
-	return string.format("%02d:%02d", minutes, remainingSeconds)
-end
-
 function RuntimeHelpers.formatLongTime(seconds)
 	local whole = math.max(0, math.floor(tonumber(seconds) or 0))
 	local hours = math.floor(whole / 3600)
@@ -2245,38 +1719,17 @@ function RuntimeHelpers.formatLongTime(seconds)
 	return string.format("%02d:%02d:%02d", hours, minutes, remainingSeconds)
 end
 
-function RuntimeHelpers.getPuzzleTimeLimit(puzzleData, modeName)
-	return Dependencies.TimerRules.GetBaseTimeLimit(puzzleData, modeName or state.mode)
-end
-
-function RuntimeHelpers.getExtraTimeAmount()
-	return Dependencies.TimerRules.GetExtraTimeAmount(state.timedOriginalDurationSeconds or state.timedDurationSeconds or 1)
-end
-
-function RuntimeHelpers.getFreezeDuration()
-	return Dependencies.TimerRules.GetFreezeDuration(state.timedOriginalDurationSeconds or state.timedDurationSeconds or 1)
-end
-
-function RuntimeHelpers.calculateAwardedStars(cleared, remainingTime, lossReason)
+function RuntimeHelpers.calculateAwardedStars(cleared)
 	if state.duelActive then
 		return 0
 	end
 
-	if cleared == true then
-		return Dependencies.StarRules.CalculateAward(
-			state.mode,
-			state.puzzleIndex,
-			remainingTime,
-			state.timeBoostUsed == true,
-			true
-		)
-	end
-
-	local timedOut = tostring(lossReason or "") == "timeout"
-	local totalWords = state.currentPuzzle and #state.currentPuzzle.words or 0
-	local foundWords = timedOut and countFoundWords() or 0
-
-	return Dependencies.StarRules.CalculateLossAward(foundWords, totalWords, timedOut)
+	return Dependencies.StarRules.CalculateAward(
+		state.mode,
+		state.puzzleIndex,
+		state.currentBoardHintUses,
+		cleared == true
+	)
 end
 
 function RuntimeHelpers.calculateAwardedPuzzlePiecesPreview()
@@ -2301,28 +1754,6 @@ function RuntimeHelpers.getCorrectWordSoundPitch()
 end
 
 function RuntimeHelpers.printAwardedStars(_stars)
-end
-
-function RuntimeHelpers.ensureTimedActionButton(parent, names)
-	if not parent then
-		return nil, nil, nil
-	end
-
-	local resolvedNames = type(names) == "table" and names or { tostring(names) }
-	local root = findDescendantByNames(parent, resolvedNames, nil)
-	if not root then
-		return nil, nil, nil
-	end
-
-	local button = findButtonLike(root)
-	local label = nil
-	if root:IsA("TextButton") or root:IsA("TextLabel") then
-		label = root
-	else
-		label = findTextObject(root, { "Label", "TextLabel", "Amount" })
-	end
-
-	return root, button, label
 end
 
 getDailyModeInfo = function()
@@ -2428,8 +1859,6 @@ local function applySnapshot(snapshot)
 	RuntimeHelpers.syncClientDataMirror(snapshot)
 	state.totalStars = totalWins
 	state.availableHints = math.max(0, math.floor((snapshot.inventory and snapshot.inventory.hintsAvailable) or state.availableHints or 0))
-	state.availableTimeBoosts = math.max(0, math.floor((snapshot.inventory and snapshot.inventory.timeBoostsAvailable) or state.availableTimeBoosts or 0))
-	state.availableFreezeTime = math.max(0, math.floor((snapshot.inventory and snapshot.inventory.freezeTimeAvailable) or state.availableFreezeTime or 0))
 	state.savedClassicLevel = math.clamp(math.floor((snapshot.progression and snapshot.progression.lastClassicLevel) or state.savedClassicLevel or 1), 1, #Dependencies.Levels)
 	local snapshotBoardState = type(snapshot.boardState) == "table" and snapshot.boardState or nil
 	if snapshotBoardState and snapshotBoardState.mode == "Classic" then
@@ -2631,11 +2060,9 @@ local function bootstrapServerState()
 	remotes.trackAction = waitForRemote(Dependencies.RemoteConfig.TrackAction, "RemoteEvent", 2)
 	remotes.stateUpdated = waitForRemote(Dependencies.RemoteConfig.StateUpdated, "RemoteEvent", 2)
 	remotes.useHint = waitForRemote(Dependencies.RemoteConfig.UseHint, "RemoteFunction", 2)
-	remotes.useTimedProduct = waitForRemote(Dependencies.RemoteConfig.UseTimedProduct, "RemoteFunction", 2)
 	local sharedRemotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 	local sharedEventsFolder = sharedRemotesFolder and sharedRemotesFolder:FindFirstChild("Events") or nil
 	remotes.adminBoardReset = sharedEventsFolder and sharedEventsFolder:FindFirstChild("AdminBoardReset") or nil
-	remotes.purchaseSuccess = sharedEventsFolder and sharedEventsFolder:FindFirstChild("PurchaseSuccess") or nil
 	remotes.claimGift = sharedEventsFolder and sharedEventsFolder:FindFirstChild("ClaimGift") or nil
 
 	if remotes.stateUpdated then
@@ -2655,9 +2082,6 @@ local function bootstrapServerState()
 			state.duelSourceMode = nil
 			state.duelServerStarted = false
 			state.duelLocalCountdownFinished = false
-			state.timedCountdownPending = false
-			state.timedRunActive = false
-			state.timedRunEnding = false
 			state.boardStartCountdownPending = false
 			state.gameEnded = true
 			if ui.countdownFrame then
@@ -2673,23 +2097,6 @@ local function bootstrapServerState()
 				soundName = false,
 				duration = 2.4,
 			})
-		end)
-	end
-
-	if remotes.purchaseSuccess then
-		remotes.purchaseSuccess.OnClientEvent:Connect(function(kind)
-			local normalizedKind = tostring(kind or "")
-			if normalizedKind ~= "time_boost" and normalizedKind ~= "freeze_time" then
-				return
-			end
-
-			state.pendingTimedProductKind = nil
-			refreshActionButtons()
-			task.defer(function()
-				if TimedProduct.tryUse then
-					TimedProduct.tryUse(normalizedKind, true)
-				end
-			end)
 		end)
 	end
 
@@ -2779,8 +2186,6 @@ do
 		TextService = TextService,
 		UserInputService = UserInputService,
 		Workspace = Workspace,
-		MarketplaceService = MarketplaceService,
-		TimedProductRuntime = TimedProductRuntime,
 		RuntimeHelpers = RuntimeHelpers,
 		Dependencies = Dependencies,
 		ClassicLevels = ClassicLevels,
@@ -2795,7 +2200,6 @@ do
 		findDescendantByNames = findDescendantByNames,
 		findTextObject = findTextObject,
 		ensureScaleController = ensureScaleController,
-		setBarFillAlpha = setBarFillAlpha,
 		tween = tween,
 		applyTextFont = applyTextFont,
 		cloneTable = cloneTable,
@@ -2892,8 +2296,6 @@ do
 	startMode = boardRuntime.startMode
 	handleMenuPlayPressed = boardRuntime.handleMenuPlayPressed
 	startClassicLevelFromSelector = boardRuntime.startClassicLevelFromSelector
-	endTimedRun = boardRuntime.endTimedRun
-	TimedProduct = boardRuntime.timedProduct or TimedProduct
 	setStatus = boardRuntime.setStatus
 	getWordColor = boardRuntime.getWordColor
 	assignWordColors = boardRuntime.assignWordColors
@@ -2919,7 +2321,6 @@ ButtonUi = ButtonUiModule.new({
 	colors = COLORS,
 	modeOrder = LAYOUT.ModeOrder,
 	runtimeHelpers = RuntimeHelpers,
-	timedProduct = TimedProduct,
 	uiEffects = Dependencies.UIEffects,
 	ensureScaleController = ensureScaleController,
 	bindButtonHoverSound = bindButtonHoverSound,
@@ -3023,60 +2424,6 @@ refreshActionButtons = function()
 	end
 	ButtonUi.setInteractivityOnly(ui.hintButton, hintEnabled)
 
-	local timerToolsVisible = gameViewDisplayed and not state.duelActive
-	local timerToolsUsable = hasPuzzle and modeConfig.startTime ~= nil and not state.duelActive
-	local timedPromptPending = state.pendingTimedProductKind ~= nil
-	local timeBoostEnabled = timerToolsUsable and canInteract and not state.timeBoostUsed and not timedPromptPending
-	local freezeTimeEnabled = timerToolsUsable and canInteract and not state.freezeTimeUsed and not timedPromptPending
-	local moreTimeVisible = timerToolsVisible and RuntimeHelpers.shouldShowMoreTimeButton()
-	local remainingSeconds = math.max(0, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-	local moreTimeThreshold = math.max(
-		math.ceil(math.max(1, math.floor(tonumber(state.timedDurationSeconds or state.timedOriginalDurationSeconds) or 1)) / 3),
-		RuntimeHelpers.getTimedWarningThreshold()
-	)
-	local warningActive = RuntimeHelpers.isTimedWarningActive()
-	local moreTimeDebugKey = table.concat({
-		tostring(gameViewDisplayed),
-		tostring(hasPuzzle),
-		tostring(timerToolsVisible),
-		tostring(timerToolsUsable),
-		tostring(moreTimeVisible),
-		tostring(timeBoostEnabled),
-		tostring(state.timeBoostUsed == true),
-		tostring(timedPromptPending),
-		tostring(warningActive),
-	}, "|")
-	if warningActive or state.moreTimeDebugKey ~= moreTimeDebugKey then
-		state.moreTimeDebugKey = moreTimeDebugKey
-		print(string.format(
-			"[WordSearch MoreTime] refresh visible=%s enabled=%s warning=%s remaining=%d threshold=%d root=%s button=%s used=%s pending=%s runActive=%s countdown=%s gameEnded=%s",
-			tostring(moreTimeVisible),
-			tostring(timeBoostEnabled),
-			tostring(warningActive),
-			remainingSeconds,
-			moreTimeThreshold,
-			tostring(ui.timeBoostRoot and ui.timeBoostRoot:GetFullName() or "nil"),
-			tostring(ui.timeBoostButton and ui.timeBoostButton:GetFullName() or "nil"),
-			tostring(state.timeBoostUsed == true),
-			tostring(timedPromptPending),
-			tostring(state.timedRunActive == true),
-			tostring(state.timedCountdownPending == true),
-			tostring(state.gameEnded == true)
-		))
-	end
-
-	if ui.timeBoostRoot and ui.timeBoostRoot:IsA("GuiObject") then
-		ui.timeBoostRoot.Visible = moreTimeVisible
-	end
-	if ui.timeBoostButton and ui.timeBoostButton:IsA("GuiObject") then
-		ui.timeBoostButton.Visible = moreTimeVisible
-	end
-	if ui.freezeTimeRoot and ui.freezeTimeRoot:IsA("GuiObject") then
-		ui.freezeTimeRoot.Visible = timerToolsVisible
-	end
-	ButtonUi.setClickableOnly(ui.timeBoostButton, timeBoostEnabled)
-	ButtonUi.setClickableOnly(ui.freezeTimeButton, freezeTimeEnabled)
-
 	local nextEnabled = state.mode == "Classic"
 		and canInteract and state.puzzleIndex < #Dependencies.Levels
 		or (state.mode ~= "Classic" and canInteract)
@@ -3151,8 +2498,6 @@ do
 		findTextObject = findTextObject,
 		ensureScaleController = ensureScaleController,
 		findButtonLike = findButtonLike,
-		findBarContainer = findBarContainer,
-		setBarFillAlpha = setBarFillAlpha,
 		bindButtonHoverSound = bindButtonHoverSound,
 		applyTextFont = applyTextFont,
 		getWordRowTemplate = getWordRowTemplate,
@@ -3265,62 +2610,10 @@ function RuntimeHelpers.restoreResumeBoardState(resumeBoardState)
 	state.sessionScore = math.max(0, math.floor(tonumber(resumeBoardState.sessionScore) or 0))
 	state.puzzlesCleared = math.max(0, math.floor(tonumber(resumeBoardState.puzzlesCleared) or 0))
 	state.streak = math.max(0, math.floor(tonumber(resumeBoardState.streak) or 0))
-	state.timedComboMultiplier = 1
-	state.timedComboPausedRemaining = 0
-	state.timedComboAccent = nil
 	state.gameEnded = false
 	hideSummary()
 	clearHint()
-
-	local modeConfig = getModeConfig(state.mode)
-	if modeConfig.startTime then
-		local remainingTime = math.max(1, math.floor(tonumber(resumeBoardState.remainingTime) or modeConfig.startTime))
-		local originalDuration = RuntimeHelpers.getPuzzleTimeLimit(buildPuzzleDefinition(
-			math.clamp(math.floor(tonumber(resumeBoardState.level) or state.savedClassicLevel or 1), 1, #Dependencies.Levels),
-			resumeBoardState.mode,
-			math.max(1, math.floor(tonumber(resumeBoardState.seed) or nextSeed(state.savedClassicLevel)))
-		), resumeBoardState.mode)
-		state.timedOriginalDurationSeconds = originalDuration
-		state.timeBoostUsed = resumeBoardState.timeBoostUsed == true
-		state.freezeTimeUsed = resumeBoardState.freezeTimeUsed == true
-		state.timedDurationSeconds = originalDuration + (state.timeBoostUsed and RuntimeHelpers.getExtraTimeAmount() or 0)
-		state.timedStartTick = tick()
-		state.timedDeadline = state.timedStartTick + remainingTime
-		state.timedSecondsLeft = remainingTime
-		state.lastTimerWholeSecond = remainingTime
-		state.timedStartCueEndsAt = 0
-		state.timedTimerVisualKey = ""
-		state.timedCountdownPending = false
-		state.timedRunActive = true
-		state.timedRunEnding = false
-		state.gameplayInputLocked = false
-		state.freezeTimeEndsAt = tick() + math.max(0, tonumber(resumeBoardState.freezeTimeRemaining) or 0)
-		state.timedComboMultiplier = 1
-		state.timedComboExpiresAt = 0
-		if state.freezeTimeEndsAt > tick() then
-			state.timedRunActive = false
-			state.timedStartTick = 0
-			state.timedDeadline = 0
-		end
-	else
-		state.timedDeadline = 0
-		state.timedStartTick = 0
-		state.timedOriginalDurationSeconds = 0
-		state.timedDurationSeconds = 0
-		state.timedSecondsLeft = 0
-		state.lastTimerWholeSecond = nil
-		state.timedStartCueEndsAt = 0
-		state.timedTimerVisualKey = ""
-		state.timedCountdownPending = false
-		state.timedRunActive = false
-		state.timedRunEnding = false
-		state.timeBoostUsed = false
-		state.freezeTimeUsed = false
-		state.freezeTimeEndsAt = 0
-		state.gameplayInputLocked = false
-		state.timedComboMultiplier = 1
-		state.timedComboExpiresAt = 0
-	end
+	state.gameplayInputLocked = false
 
 	state.pendingResumeBoardState = resumeBoardState
 	updateHud()
@@ -3384,11 +2677,10 @@ enterSelectedMode = function()
 
 	showGameView(true, function()
 		if canResumeCurrentBoard then
-			RuntimeHelpers.resumeTimedModeFromMenu()
 			updateHud()
 			RuntimeHelpers.refreshBoard()
 			refreshPersistentLines()
-			RuntimeHelpers.beginTimedCountdownIfNeeded(state.boardToken)
+			RuntimeHelpers.beginBoardCountdownIfNeeded(state.boardToken)
 			return
 		end
 
@@ -3430,7 +2722,6 @@ exitCurrentMode = function()
 	else
 		trackServerAction("BoardStateCleared", {})
 	end
-	RuntimeHelpers.pauseTimedModeForMenu()
 	state.resumeBoardState = resumeBoardState
 	setSelectedMenuMode(state.mode)
 	showMenuView(true)
@@ -3573,13 +2864,9 @@ Workspace.ChildAdded:Connect(function(child)
 end)
 
 InputBindings.bind({
-	player = player,
 	state = state,
-	timedProduct = TimedProduct,
 	runtimeHelpers = RuntimeHelpers,
-	marketplaceService = MarketplaceService,
 	userInputService = UserInputService,
-	refreshActionButtons = refreshActionButtons,
 	clearDrag = clearDrag,
 	playSound = playSound,
 })
@@ -3599,47 +2886,4 @@ RunService.Heartbeat:Connect(function(deltaTime)
 	RuntimeHelpers.updateSmoothDragLine(deltaTime)
 	RuntimeHelpers.updateHintAttentionPulse()
 	RuntimeHelpers.updateHintTilePulse()
-
-	if not state.gameViewActive or not getModeConfig().startTime or state.gameEnded or state.timedCountdownPending then
-		RuntimeHelpers.refreshTimedComboUi()
-		return
-	end
-
-	if (state.freezeTimeEndsAt or 0) > tick() then
-		state.timedRunActive = false
-		state.timedSecondsLeft = math.max(1, math.ceil(state.timedSecondsLeft or RuntimeHelpers.getTimedSecondsRemaining()))
-		updateHud()
-		return
-	elseif (state.freezeTimeEndsAt or 0) > 0 then
-		state.freezeTimeEndsAt = 0
-		if not state.timedRunActive and not state.gameEnded then
-			state.timedRunActive = true
-			state.timedStartTick = tick()
-			state.timedDeadline = state.timedStartTick + math.max(1, math.floor(state.timedSecondsLeft or 1))
-		end
-	end
-
-	if not state.timedRunActive then
-		RuntimeHelpers.refreshTimedComboUi()
-		return
-	end
-
-	local remaining = math.max(0, state.timedDeadline - tick())
-	local wholeSeconds = math.ceil(remaining)
-
-	if wholeSeconds ~= state.lastTimerWholeSecond then
-		state.lastTimerWholeSecond = wholeSeconds
-		state.timedSecondsLeft = wholeSeconds
-		updateHud()
-		if wholeSeconds > 0 then
-			playSound("Clock")
-		end
-
-		if wholeSeconds > 0 and wholeSeconds <= 10 and ui.secondaryChipScale then
-			pulseScale(ui.secondaryChipScale, 1.05, 1, 0)
-		end
-	end
-	if remaining <= 0 then
-		endTimedRun()
-	end
 end)

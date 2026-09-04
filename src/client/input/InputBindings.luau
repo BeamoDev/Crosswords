@@ -13,31 +13,8 @@ local function isActiveTouchInput(state, input)
 end
 
 function module.bind(config)
-	local player = config.player
 	local state = config.state
-	local timedProduct = config.timedProduct
 	local runtimeHelpers = config.runtimeHelpers
-
-	config.marketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, purchased)
-		if userId ~= player.UserId then
-			return
-		end
-
-		if purchased then
-			return
-		end
-
-		local pendingKind = state.pendingTimedProductKind
-		if not pendingKind then
-			return
-		end
-
-		local pendingProductId = timedProduct.getProductId(pendingKind)
-		if type(pendingProductId) == "number" and pendingProductId == productId then
-			state.pendingTimedProductKind = nil
-			config.refreshActionButtons()
-		end
-	end)
 
 	config.userInputService.InputBegan:Connect(function(input, gameProcessed)
 		if input.UserInputType == Enum.UserInputType.Touch then

@@ -30,7 +30,6 @@ local DEFAULT_REMOTE_CONFIG = {
 	TrackAction = "TrackAction",
 	StateUpdated = "StateUpdated",
 	UseHint = "UseHint",
-	UseTimedProduct = "UseTimedProduct",
 }
 
 local RemoteConfig = SharedConfig.Resolve("RemoteConfig", DEFAULT_REMOTE_CONFIG)
@@ -86,7 +85,10 @@ local getBootstrapRemote = getOrCreate(remotesFolder, "RemoteFunction", RemoteCo
 local trackActionRemote = getOrCreate(remotesFolder, "RemoteEvent", RemoteConfig.TrackAction)
 local stateUpdatedRemote = getOrCreate(remotesFolder, "RemoteEvent", RemoteConfig.StateUpdated)
 local useHintRemote = getOrCreate(remotesFolder, "RemoteFunction", RemoteConfig.UseHint)
-local useTimedProductRemote = getOrCreate(remotesFolder, "RemoteFunction", RemoteConfig.UseTimedProduct)
+local retiredTimedProductRemote = remotesFolder:FindFirstChild("UseTimedProduct")
+if retiredTimedProductRemote then
+	retiredTimedProductRemote:Destroy()
+end
 local sharedRemotesFolder = getOrCreate(ReplicatedStorage, "Folder", "Remotes")
 local sharedEventsFolder = getOrCreate(sharedRemotesFolder, "Folder", "Events")
 local sharedFunctionsFolder = getOrCreate(sharedRemotesFolder, "Folder", "Functions")
@@ -167,10 +169,6 @@ end)
 
 useHintRemote.OnServerInvoke = function(player, payload)
 	return ProgressionService.UseHint(player, payload)
-end
-
-useTimedProductRemote.OnServerInvoke = function(player, payload)
-	return ProgressionService.UseTimedProduct(player, payload)
 end
 
 purchaseHintsRemote.OnServerInvoke = function(player, amount)

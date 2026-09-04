@@ -4,7 +4,6 @@ local RemoteConfig = {
 	TrackAction = "TrackAction",
 	StateUpdated = "StateUpdated",
 	UseHint = "UseHint",
-	UseTimedProduct = "UseTimedProduct",
 }
 
 return RemoteConfig

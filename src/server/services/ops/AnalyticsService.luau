@@ -87,10 +87,6 @@ local function getCurrencyBalance(player: Player, currency: string): number
 			return math.max(0, math.floor((mutableData.resources and mutableData.resources.hintsAvailable) or 0))
 		elseif normalized == "pieces" or normalized == "puzzle_pieces" then
 			return math.max(0, math.floor((mutableData.resources and mutableData.resources.puzzlePieces) or 0))
-		elseif normalized == "time_boost" then
-			return math.max(0, math.floor((mutableData.resources and mutableData.resources.timeBoostsAvailable) or 0))
-		elseif normalized == "freeze_time" then
-			return math.max(0, math.floor((mutableData.resources and mutableData.resources.freezeTimeAvailable) or 0))
 		end
 		return 0
 	end
@@ -107,14 +103,6 @@ local function getCurrencyBalance(player: Player, currency: string): number
 	elseif normalized == "pieces" or normalized == "puzzle_pieces" then
 		local puzzlePieces = data:FindFirstChild("PuzzlePieces")
 		return (puzzlePieces and tonumber((puzzlePieces :: any).Value)) or 0
-	elseif normalized == "time_boost" then
-		local powerupsFolder = data:FindFirstChild("Powerups")
-		local availableValue = powerupsFolder and powerupsFolder:FindFirstChild("TimeBoostsAvailable")
-		return (availableValue and tonumber((availableValue :: any).Value)) or 0
-	elseif normalized == "freeze_time" then
-		local powerupsFolder = data:FindFirstChild("Powerups")
-		local availableValue = powerupsFolder and powerupsFolder:FindFirstChild("FreezeTimeAvailable")
-		return (availableValue and tonumber((availableValue :: any).Value)) or 0
 	end
 
 	return 0

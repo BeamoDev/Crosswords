@@ -9,7 +9,6 @@ local DailyMode = require(sharedFolder:WaitForChild("progression"):WaitForChild(
 local DefinitionBuilder = require(sharedFolder:WaitForChild("board"):WaitForChild("DefinitionBuilder"))
 local Levels = require(sharedFolder:WaitForChild("content"):WaitForChild("Levels"))
 local BoardGenerator = require(sharedFolder:WaitForChild("board"):WaitForChild("BoardGenerator"))
-local TimerRules = require(sharedFolder:WaitForChild("progression"):WaitForChild("TimerRules"))
 local utilFolder = script.Parent.Parent.Parent:WaitForChild("utils")
 local WordPathUtils = require(utilFolder:WaitForChild("WordPathUtils"))
 
@@ -384,36 +383,6 @@ local function buildHintSet(boardInfo, words, foundWords, mode)
 	return result
 end
 
-local function clampRemainingTime(session, remainingTime, timeBoostUsed)
-	if not session or not session.boardInfo then
-		return nil
-	end
-
-	local numericRemaining = tonumber(remainingTime)
-	if not numericRemaining then
-		return nil
-	end
-
-	local maxRemaining = TimerRules.GetMaximumRemainingTime(session.boardInfo, session.mode, timeBoostUsed == true)
-	return math.clamp(math.max(1, math.floor(numericRemaining)), 1, math.max(1, maxRemaining))
-end
-
-local function clampFreezeTimeRemaining(session, freezeTimeRemaining)
-	if not session or not session.boardInfo then
-		return nil
-	end
-
-	local numericRemaining = tonumber(freezeTimeRemaining)
-	if not numericRemaining then
-		return nil
-	end
-
-	local maxRemaining = TimerRules.GetFreezeDuration(
-		TimerRules.GetBaseTimeLimit(session.boardInfo, session.mode)
-	)
-	return math.clamp(numericRemaining, 0, maxRemaining)
-end
-
 local function getEarliestStartedAtServerTime(...)
 	local earliest = nil
 
@@ -434,9 +403,6 @@ local function buildValidatedBoardState(session, sourceBoardState)
 	local puzzlesCleared = math.max(0, math.floor(tonumber(sourceBoardState.puzzlesCleared) or 0))
 	local sessionScore = math.max(0, math.floor(tonumber(sourceBoardState.sessionScore) or 0))
 	local streak = math.max(0, math.floor(tonumber(sourceBoardState.streak) or 0))
-	local timeBoostUsed = sourceBoardState.timeBoostUsed == true
-	local freezeTimeUsed = sourceBoardState.freezeTimeUsed == true
-	local freezeTimeRemaining = clampFreezeTimeRemaining(session, sourceBoardState.freezeTimeRemaining)
 	local startedAtServerTime = math.max(0, tonumber(session.boardStartedAt) or getNow())
 	local sourceStartedAtServerTime = tonumber(sourceBoardState.startedAtServerTime)
 	local mergedHintWords = {}
@@ -462,10 +428,6 @@ local function buildValidatedBoardState(session, sourceBoardState)
 		seed = session.seed,
 		foundWords = serializeWordSet(session.foundWords, session.boardInfo.words),
 		hintedWords = serializeWordSet(session.hintedWords, session.boardInfo.words),
-		remainingTime = clampRemainingTime(session, sourceBoardState.remainingTime, timeBoostUsed),
-		timeBoostUsed = timeBoostUsed,
-		freezeTimeUsed = freezeTimeUsed,
-		freezeTimeRemaining = freezeTimeRemaining,
 		sessionScore = sessionScore,
 		puzzlesCleared = puzzlesCleared,
 		streak = streak,

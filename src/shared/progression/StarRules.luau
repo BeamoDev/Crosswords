@@ -2,7 +2,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local sharedFolder = ReplicatedStorage:WaitForChild("shared")
 local Levels = require(sharedFolder:WaitForChild("content"):WaitForChild("Levels"))
-local TimerRules = require(sharedFolder:WaitForChild("progression"):WaitForChild("TimerRules"))
 
 local StarRules = {}
 
@@ -61,23 +60,19 @@ function StarRules.ResolveSlot(mode, level, metadata)
 	}
 end
 
-function StarRules.CalculateLossAward(foundWordsCount, totalWords, timedOut)
-	local safeTotalWords = math.max(0, math.floor(tonumber(totalWords) or 0))
-	local safeFoundWords = math.max(0, math.floor(tonumber(foundWordsCount) or 0))
+function StarRules.CalculateAward(_mode, _level, hintsUsed, cleared)
+	if cleared ~= true then
+		return 0
+	end
 
-	if timedOut == true and safeTotalWords > 0 and safeFoundWords >= math.ceil(safeTotalWords * 0.5) then
+	local safeHintsUsed = math.max(0, math.floor(tonumber(hintsUsed) or 0))
+	if safeHintsUsed == 0 then
+		return 3
+	elseif safeHintsUsed == 1 then
 		return 2
 	end
 
 	return 1
-end
-
-function StarRules.CalculateAward(mode, level, remainingTime, timeBoostUsed, cleared)
-	if cleared == true then
-		return 3
-	end
-
-	return StarRules.CalculateLossAward(0, 0, false)
 end
 
 return StarRules

@@ -35,6 +35,7 @@ local SESSION_TOKEN = HttpService:GenerateGUID(false)
 local MAX_CLASSIC_LEVEL = math.max(1, #Levels)
 local MAX_SAVED_BOARD_WORDS = 24
 local MAX_STORED_RECEIPTS = 150
+local CURRENT_DATA_VERSION = 11
 local VALID_BOARD_MODES = {
 	Classic = true,
 	Themed = true,
@@ -220,12 +221,18 @@ end
 
 local function normalizeStoredData(data)
 	data = type(data) == "table" and data or {}
-	data.version = math.max(10, clampInt(data.version))
+	local storedVersion = clampInt(data.version)
 	data.resources = type(data.resources) == "table" and data.resources or {}
 	data.resources.hintsAvailable = clampInt(data.resources.hintsAvailable)
-	data.resources.timeBoostsAvailable = clampInt(data.resources.timeBoostsAvailable)
-	data.resources.freezeTimeAvailable = clampInt(data.resources.freezeTimeAvailable)
+	if storedVersion < CURRENT_DATA_VERSION then
+		local retiredTimerItems = clampInt(data.resources.timeBoostsAvailable)
+			+ clampInt(data.resources.freezeTimeAvailable)
+		data.resources.hintsAvailable += retiredTimerItems
+	end
+	data.resources.timeBoostsAvailable = nil
+	data.resources.freezeTimeAvailable = nil
 	data.resources.puzzlePieces = clampInt(data.resources.puzzlePieces)
+	data.version = CURRENT_DATA_VERSION
 	data.progression = type(data.progression) == "table" and data.progression or {}
 	data.progression.giftClaimMilestone = clampInt(data.progression.giftClaimMilestone)
 	data.stats = type(data.stats) == "table" and data.stats or {}
@@ -281,11 +288,9 @@ end
 
 local function defaultData()
 	return {
-		version = 10,
+		version = CURRENT_DATA_VERSION,
 		resources = {
 			hintsAvailable = MetaConfig.DEFAULTS.StartingHints,
-			timeBoostsAvailable = 0,
-			freezeTimeAvailable = 0,
 			puzzlePieces = 0,
 		},
 		progression = {
@@ -364,7 +369,9 @@ local function decodeStoredValue(rawValue)
 end
 
 local function prepareStoredData(decoded)
+	local storedVersion = type(decoded) == "table" and clampInt(decoded.version) or 0
 	local data = deepMergeDefaults(decoded or {}, defaultData())
+	data.version = storedVersion
 	normalizeStoredData(data)
 	return data
 end
@@ -528,24 +535,14 @@ local function sanitizeBoardState(boardState)
 		level = dailyIdentity.level
 		seed = dailyIdentity.seed
 	end
-	local remainingTime = tonumber(boardState.remainingTime)
 	local sessionScore = math.max(0, math.floor(tonumber(boardState.sessionScore) or 0))
 	local puzzlesCleared = math.max(0, math.floor(tonumber(boardState.puzzlesCleared) or 0))
 	local streak = math.max(0, math.floor(tonumber(boardState.streak) or 0))
 	local hintUses = math.max(0, math.floor(tonumber(boardState.hintUses) or 0))
-	local freezeTimeRemaining = tonumber(boardState.freezeTimeRemaining)
 	local startedAtServerTime = tonumber(boardState.startedAtServerTime)
-	local timeBoostUsed = boardState.timeBoostUsed == true
-	local freezeTimeUsed = boardState.freezeTimeUsed == true
 	local foundWords = sanitizeWordArray(boardState.foundWords)
 	local hintedWords = sanitizeWordArray(boardState.hintedWords)
 
-	if remainingTime then
-		remainingTime = math.max(1, math.floor(remainingTime))
-	end
-	if freezeTimeRemaining then
-		freezeTimeRemaining = math.clamp(freezeTimeRemaining, 0, 30)
-	end
 	if startedAtServerTime then
 		startedAtServerTime = math.max(0, startedAtServerTime)
 	end
@@ -556,10 +553,6 @@ local function sanitizeBoardState(boardState)
 		seed = seed,
 		foundWords = foundWords,
 		hintedWords = hintedWords,
-		remainingTime = remainingTime,
-		timeBoostUsed = timeBoostUsed,
-		freezeTimeUsed = freezeTimeUsed,
-		freezeTimeRemaining = freezeTimeRemaining,
 		sessionScore = sessionScore,
 		puzzlesCleared = puzzlesCleared,
 		streak = streak,
@@ -636,8 +629,6 @@ local function buildSnapshot(data)
 		},
 		inventory = {
 			hintsAvailable = math.max(0, math.floor((data.resources and data.resources.hintsAvailable) or 0)),
-			timeBoostsAvailable = math.max(0, math.floor((data.resources and data.resources.timeBoostsAvailable) or 0)),
-			freezeTimeAvailable = math.max(0, math.floor((data.resources and data.resources.freezeTimeAvailable) or 0)),
 			puzzlePieces = math.max(0, math.floor((data.resources and data.resources.puzzlePieces) or 0)),
 		},
 		progression = {
@@ -693,7 +684,6 @@ local function refreshPlayerDataFolder(player, data)
 	local dataFolder = getOrCreate(player, "Folder", "Data")
 	local leaderstatsFolder = getOrCreate(player, "Folder", "leaderstats")
 	local hintsFolder = getOrCreate(dataFolder, "Folder", "Hints")
-	local powerupsFolder = getOrCreate(dataFolder, "Folder", "Powerups")
 	local settingsFolder = getOrCreate(dataFolder, "Folder", "Settings")
 	local accountFolder = getOrCreate(dataFolder, "Folder", "Account")
 	local progressFolder = getOrCreate(dataFolder, "Folder", "Progress")
@@ -722,11 +712,9 @@ local function refreshPlayerDataFolder(player, data)
 	data.starProgress = sanitizedStarProgress
 	pruneBoardStateForProgression(data)
 
-	removeChildrenByName(dataFolder, { "Currency", "Coins" })
+	removeChildrenByName(dataFolder, { "Currency", "Coins", "Powerups" })
 	setIntValue(hintsFolder, "Available", (data.resources and data.resources.hintsAvailable) or 0)
 	setIntValue(hintsFolder, "TotalUsed", data.stats.hintsUsed)
-	setIntValue(powerupsFolder, "TimeBoostsAvailable", (data.resources and data.resources.timeBoostsAvailable) or 0)
-	setIntValue(powerupsFolder, "FreezeTimeAvailable", (data.resources and data.resources.freezeTimeAvailable) or 0)
 	setIntValue(dataFolder, "PuzzlePieces", (data.resources and data.resources.puzzlePieces) or 0)
 	setBoolValue(settingsFolder, "SFX", data.settings and data.settings.SFX ~= false)
 	setBoolValue(settingsFolder, "Music", data.settings and data.settings.Music ~= false)

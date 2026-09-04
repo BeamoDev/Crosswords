@@ -32,10 +32,6 @@ local DEFAULT_META_CONFIG = {
 		[5] = 3573028342,
 		[25] = 3573028459,
 	},
-	TIMED_PRODUCT_IDS = {
-		TimeBoost = 3573028604,
-		FreezeTime = 3573028785,
-	},
 	DAILY_REWARD = {
 		BaseXp = 0,
 		StepXp = 0,
@@ -49,6 +45,10 @@ local DEFAULT_META_CONFIG = {
 }
 
 local MetaConfig = SharedConfig.Resolve("MetaConfig", DEFAULT_META_CONFIG)
+local RETIRED_PRODUCT_HINT_GRANTS = {
+	[3573028604] = 1,
+	[3573028785] = 1,
+}
 
 local function getCurrentDay()
 	return math.floor(os.time() / 86400)
@@ -153,8 +153,8 @@ end
 local function ensureMetaProgression(data)
 	data.resources = data.resources or {}
 	data.resources.hintsAvailable = clampInt(data.resources.hintsAvailable, 0)
-	data.resources.timeBoostsAvailable = clampInt(data.resources.timeBoostsAvailable, 0)
-	data.resources.freezeTimeAvailable = clampInt(data.resources.freezeTimeAvailable, 0)
+	data.resources.timeBoostsAvailable = nil
+	data.resources.freezeTimeAvailable = nil
 	data.resources.puzzlePieces = clampInt(data.resources.puzzlePieces, 0)
 	data.progression = data.progression or {}
 	data.progression.giftClaimMilestone = clampInt(data.progression.giftClaimMilestone, 0)
@@ -560,50 +560,28 @@ function MetaService.GrantProductPurchase(player, productId, receiptId)
 		}
 	end
 
-	if MetaConfig.TIMED_PRODUCT_IDS.TimeBoost == productId then
-		data.resources.timeBoostsAvailable += 1
+	local retiredHintGrant = RETIRED_PRODUCT_HINT_GRANTS[productId]
+	if retiredHintGrant then
+		data.resources.hintsAvailable += retiredHintGrant
 		markProcessedReceipt(data, normalizedReceiptId)
 		sendPurchaseWebhook(
 			player,
-			"+2 Minutes",
+			"Retired Gameplay Product",
 			productId,
-			"1 Time Boost",
-			0x5AA9FF
+			string.format("%d Hint", retiredHintGrant),
+			0x87CEEB
 		)
-		AnalyticsService.TrackEconomySource(player, "time_boost", "dev_product", 1, {
+		AnalyticsService.TrackEconomySource(player, "hints", "retired_product_conversion", retiredHintGrant, {
 			productId = productId,
 		})
-		AnalyticsService.TrackCriticalStep(player, "TimeBoostProductPurchased", {
+		AnalyticsService.TrackCriticalStep(player, "RetiredProductConverted", {
 			productId = productId,
+			hints = retiredHintGrant,
 		})
 		return {
 			success = true,
-			kind = "time_boost",
-			amount = 1,
-			snapshot = PlayerDataStore.GetSnapshot(player),
-		}
-	end
-
-	if MetaConfig.TIMED_PRODUCT_IDS.FreezeTime == productId then
-		data.resources.freezeTimeAvailable += 1
-		markProcessedReceipt(data, normalizedReceiptId)
-		sendPurchaseWebhook(
-			player,
-			"Freeze Timer (30 Seconds)",
-			productId,
-			"1 Freeze Time",
-			0xA8F0FF
-		)
-		AnalyticsService.TrackEconomySource(player, "freeze_time", "dev_product", 1, {
-			productId = productId,
-		})
-		AnalyticsService.TrackCriticalStep(player, "FreezeTimeProductPurchased", {
-			productId = productId,
-		})
-		return {
-			success = true,
-			kind = "freeze_time",
-			amount = 1,
+			kind = "hints",
+			amount = retiredHintGrant,
 			snapshot = PlayerDataStore.GetSnapshot(player),
 		}
 	end

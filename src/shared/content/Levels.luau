@@ -632,18 +632,29 @@ for _, tier in ipairs(LEVEL_TIERS) do
 			)
 			local seed = 4100 + levelNumber * 977 + stageIndex * 131
 			local words = chooseWords(pool, wordCount, seed)
+			local directions = cloneArray(stage.directions)
+			local subtitle = string.format("%s - %s", tier.name, stage.subtitle)
+
+			-- Board 1 is a deliberate onboarding board: two familiar words,
+			-- a smaller grid, and left-to-right placement only.
+			if levelNumber == 1 then
+				gridSize = 4
+				words = { "CAT", "DOG" }
+				directions = { "E" }
+				subtitle = "Very Easy - First steps"
+			end
 
 			table.insert(Levels, {
 				level = levelNumber,
 				title = string.format("Level %d", levelNumber),
-				subtitle = string.format("%s - %s", tier.name, stage.subtitle),
+				subtitle = subtitle,
 				tier = tier.name,
 				pack = tier.packName or tier.name,
 				tierLevel = tierLevelNumber,
 				packLevel = tierLevelNumber,
 				gridSize = gridSize,
 				words = words,
-				directions = cloneArray(stage.directions),
+				directions = directions,
 				seed = seed,
 			})
 		end

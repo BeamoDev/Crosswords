@@ -18,13 +18,6 @@ PuzzleEconomy.ModeMultipliers = {
 	duel = 1.0,
 }
 
-PuzzleEconomy.SpeedBonuses = {
-	{ threshold = 20, amount = 5 },
-	{ threshold = 35, amount = 4 },
-	{ threshold = 50, amount = 3 },
-	{ threshold = 70, amount = 2 },
-}
-
 PuzzleEconomy.CleanHintBonus = 2
 PuzzleEconomy.CleanResetBonus = 1
 PuzzleEconomy.HintPenalty = 3
@@ -56,17 +49,6 @@ function PuzzleEconomy.GetBasePiecesForGrid(gridSize)
 	return PuzzleEconomy.BaseMinimumCompletionReward
 end
 
-function PuzzleEconomy.GetSpeedBonus(timeSpent)
-	local elapsed = math.max(0, tonumber(timeSpent) or 0)
-	for _, rule in ipairs(PuzzleEconomy.SpeedBonuses) do
-		if elapsed <= rule.threshold then
-			return rule.amount
-		end
-	end
-
-	return 0
-end
-
 function PuzzleEconomy.ScaleCompletionReward(amount)
 	local numericAmount = math.max(0, tonumber(amount) or 0)
 	return math.max(
@@ -85,7 +67,8 @@ function PuzzleEconomy.CalculateCompletionBreakdown(ctx)
 	local resetsUsed = math.max(0, math.floor(tonumber(ctx.resets) or 0))
 	local basePieces = PuzzleEconomy.GetBasePiecesForGrid(gridSize)
 	local modeMultiplier = PuzzleEconomy.ModeMultipliers[mode] or 1.0
-	local speedBonus = PuzzleEconomy.GetSpeedBonus(timeSpent)
+	-- Solve duration is retained for diagnostics only. It never changes rewards.
+	local speedBonus = 0
 	local hintPenalty = math.min(hintsUsed * PuzzleEconomy.HintPenalty, PuzzleEconomy.HintPenaltyCap)
 	local resetPenalty = math.min(resetsUsed * PuzzleEconomy.ResetPenalty, PuzzleEconomy.ResetPenaltyCap)
 	local cleanHintBonus = hintsUsed <= 0 and PuzzleEconomy.CleanHintBonus or 0

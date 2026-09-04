@@ -6,8 +6,6 @@ local ReplicatedStorage = env.ReplicatedStorage or game:GetService("ReplicatedSt
 local TextService = env.TextService
 local UserInputService = env.UserInputService
 local Workspace = env.Workspace
-local MarketplaceService = env.MarketplaceService
-local TimedProductRuntime = env.TimedProductRuntime
 
 local RuntimeHelpers = env.RuntimeHelpers
 local Dependencies = env.Dependencies
@@ -24,7 +22,6 @@ local destroyLineEntry = env.destroyLineEntry
 local findDescendantByNames = env.findDescendantByNames
 local findTextObject = env.findTextObject
 local ensureScaleController = env.ensureScaleController
-local setBarFillAlpha = env.setBarFillAlpha
 local tween = env.tween
 local applyTextFont = env.applyTextFont
 local cloneTable = env.cloneTable
@@ -138,8 +135,6 @@ local performPuzzleLoad
 local startMode
 local handleMenuPlayPressed
 local startClassicLevelFromSelector
-local endTimedRun
-local TimedProduct = {}
 
 local function chooseModeLevelIndex(mode)
 	if mode == "Classic" then
@@ -888,61 +883,7 @@ updateWordsLabel = function()
 	autoScrollWordListToRemainingWord()
 end
 
-function RuntimeHelpers.updateTimedWordScatter(active)
-	local hasScatter = active == true
-	if not state.currentPuzzle or type(ui.wordRows) ~= "table" then
-		return
-	end
-
-	local timeNow = os.clock()
-	local duration = math.max(1, tonumber(state.timedDurationSeconds) or 1)
-	local secondsLeft = math.max(0, tonumber(state.timedSecondsLeft) or duration)
-	local urgency = 1 - math.clamp(secondsLeft / duration, 0, 1)
-	local baseOffset = 1.5 + (urgency * 5)
-	local rotationAmount = 1.5 + (urgency * 7)
-
-	for index, word in ipairs(state.currentPuzzle.words) do
-		local rowData = ui.wordRows[word]
-		if rowData and rowData.row then
-			local found = state.foundWords[word] == true
-			local intensity = hasScatter and (found and 0.2 or 1) or 0
-			local xOffset = math.cos((timeNow * 3.8) + (index * 0.73)) * baseOffset * intensity
-			local yOffset = math.sin((timeNow * 4.6) + (index * 1.11)) * baseOffset * 0.72 * intensity
-			local rowRotation = math.sin((timeNow * 3.1) + (index * 0.57)) * rotationAmount * intensity
-
-			rowData.row.Rotation = rowRotation
-
-			if rowData.label and rowData.baseLabelPosition then
-				rowData.label.Position = UDim2.new(
-					rowData.baseLabelPosition.X.Scale,
-					rowData.baseLabelPosition.X.Offset + math.floor(xOffset),
-					rowData.baseLabelPosition.Y.Scale,
-					rowData.baseLabelPosition.Y.Offset + math.floor(yOffset)
-				)
-			end
-
-			if rowData.dot and rowData.baseDotPosition then
-				rowData.dot.Position = UDim2.new(
-					rowData.baseDotPosition.X.Scale,
-					rowData.baseDotPosition.X.Offset - math.floor(xOffset * 0.35),
-					rowData.baseDotPosition.Y.Scale,
-					rowData.baseDotPosition.Y.Offset + math.floor(yOffset * 0.35)
-				)
-			end
-
-			if rowData.strike and rowData.baseStrikePosition then
-				rowData.strike.Position = UDim2.new(
-					rowData.baseStrikePosition.X.Scale,
-					rowData.baseStrikePosition.X.Offset + math.floor(xOffset * 0.5),
-					rowData.baseStrikePosition.Y.Scale,
-					rowData.baseStrikePosition.Y.Offset + math.floor(yOffset * 0.5)
-				)
-			end
-		end
-	end
-end
-
-function RuntimeHelpers.updateTimedLetterScatter(active, shuffleStep)
+function RuntimeHelpers.updateCountdownLetterScatter(active, shuffleStep)
 	local shouldScramble = active == true
 	if not state.currentPuzzle then
 		return
@@ -988,16 +929,12 @@ updateHud = function()
 	local modeConfig = getModeConfig()
 	local levelNumber = state.currentPuzzle and (state.currentPuzzle.level or state.puzzleIndex) or state.puzzleIndex
 	local secondaryText
-	local timedModeVisible = isGameViewDisplayed() and not state.duelActive
-
 	if state.duelActive then
 		secondaryText = "FIRST TO CLEAR WINS"
 	elseif state.mode == "Classic" then
 		secondaryText = string.format("LEVEL %d / %d", levelNumber, #Dependencies.Levels)
 	elseif state.mode == "Daily" then
 		secondaryText = "25 X 25 DAILY"
-	elseif modeConfig.startTime then
-		secondaryText = "TIME " .. RuntimeHelpers.formatTime(state.timedSecondsLeft)
 	else
 		secondaryText = string.format("BOARD %d", state.puzzlesCleared + 1)
 	end
@@ -1011,27 +948,11 @@ updateHud = function()
 		ui.gameTitleLabel.Text = RuntimeHelpers.getGameplayTitle()
 	end
 
-	if ui.timedModeFrame and ui.timedModeFrame:IsA("GuiObject") then
-		ui.timedModeFrame.Visible = timedModeVisible
-	end
-
-	if ui.timedModeTimerLabel then
-		ui.timedModeTimerLabel.Text = timedModeVisible and RuntimeHelpers.formatTime(state.timedSecondsLeft) or "00:00"
-	end
-	RuntimeHelpers.applyTimedTimerVisual()
 	RuntimeHelpers.refreshDuelModeUi()
-
-	if ui.timedModeBar and ui.timedModeBar:IsA("GuiObject") then
-		ui.timedModeBar.Visible = false
-	end
-	setBarFillAlpha(ui.timedModeBarFill, ui.timedModeBar, 0)
-	RuntimeHelpers.refreshTimedComboUi()
 
 	if ui.secondaryChipLabel then
 		ui.secondaryChipLabel.Text = secondaryText
-		ui.secondaryChip.BackgroundColor3 = modeConfig.startTime
-			and ((state.timedSecondsLeft or 0) <= RuntimeHelpers.getTimedLowTimeThreshold() and COLORS.error or modeConfig.accent)
-			or COLORS.chipSoft
+		ui.secondaryChip.BackgroundColor3 = COLORS.chipSoft
 	end
 
 	if ui.scoreChipLabel then
@@ -2243,10 +2164,6 @@ function RuntimeHelpers.calculatePuzzleBonus()
 	local modeConfig = getModeConfig()
 	local bonus = modeConfig.completionBonus + state.currentPuzzle.gridSize * 8 + #state.currentPuzzle.words * 22
 
-	if modeConfig.startTime then
-		bonus += math.floor(state.timedSecondsLeft * 1.4)
-	end
-
 	return math.floor(bonus)
 end
 
@@ -2621,31 +2538,13 @@ function RuntimeHelpers.resetBoardRuntimeForFreshMode(modeName)
 	state.sessionScore = 0
 	state.puzzlesCleared = 0
 	state.streak = targetModeStreak
-	state.timedComboMultiplier = 1
-	state.timedComboExpiresAt = 0
-	state.timedComboPausedRemaining = 0
-	state.timedComboAccent = nil
 	state.boardStartedAt = 0
 	state.lastFoundAt = 0
 	state.wrongDragCount = 0
 	state.pendingIntroResumeBoardState = nil
 	state.gameEnded = false
-	state.timedDeadline = 0
-	state.timedStartTick = 0
-	state.timedOriginalDurationSeconds = 0
-	state.timedDurationSeconds = 0
-	state.timedSecondsLeft = 0
-	state.lastTimerWholeSecond = nil
-	state.timedStartCueEndsAt = 0
-	state.timedTimerVisualKey = ""
-	state.timedCountdownPending = false
-	state.timedRunActive = false
-	state.timedRunEnding = false
 	state.boardStartCountdownPending = false
 	state.wordRowsRevealPending = false
-	state.timeBoostUsed = false
-	state.freezeTimeUsed = false
-	state.freezeTimeEndsAt = 0
 	state.gameplayInputLocked = false
 
 	resetWordListUi()
@@ -2671,7 +2570,6 @@ function RuntimeHelpers.resetBoardRuntimeForFreshMode(modeName)
 	if ui.boardScaleController then
 		ui.boardScaleController.Scale = 1
 	end
-	RuntimeHelpers.refreshTimedComboUi()
 end
 
 function RuntimeHelpers.animateBoardExit(callback)
@@ -3203,13 +3101,6 @@ function RuntimeHelpers.buildBoardProgressPayload(includeCompletedBoard)
 		streak = state.streak,
 	}
 
-	if getModeConfig().startTime then
-		payload.remainingTime = math.max(1, math.ceil(RuntimeHelpers.getTimedSecondsRemaining()))
-		payload.timeBoostUsed = state.timeBoostUsed == true
-		payload.freezeTimeUsed = state.freezeTimeUsed == true
-		payload.freezeTimeRemaining = math.max(0, math.round(math.max(0, (state.freezeTimeEndsAt or 0) - tick()) * 100) / 100)
-	end
-
 	return payload
 end
 
@@ -3233,23 +3124,12 @@ function RuntimeHelpers.endRunAndReturnToMenu()
 	state.activeCountdownId += 1
 	state.gameEnded = true
 	state.gameplayInputLocked = false
-	state.timedCountdownPending = false
-	state.timedRunActive = false
-	state.timedRunEnding = false
-	state.timedComboMultiplier = 1
-	state.timedComboExpiresAt = 0
-	state.timedComboPausedRemaining = 0
-	state.timedComboAccent = nil
-	state.timedStartTick = 0
-	state.timedDeadline = 0
 	state.resumeBoardState = nil
 	state.pendingResumeBoardState = nil
 	setSelectedMenuMode(finishedMode)
 	if ui.countdownFrame then
 		ui.countdownFrame.Visible = false
 	end
-	RuntimeHelpers.refreshTimedComboUi()
-
 	RuntimeHelpers.animateBoardExit(function()
 		RuntimeHelpers.clearBoard()
 		clearHint()
@@ -3376,12 +3256,9 @@ function RuntimeHelpers.completeSelection()
 	if not matchedWord then
 
 		state.wrongDragCount += 1
-		if getModeConfig().startTime then
-			RuntimeHelpers.clearTimedCombo(true)
-		end
 		animateWrongSelection()
 		if state.mode == "OneLife" and #selection >= 2 then
-			local awardedStars = RuntimeHelpers.calculateAwardedStars(false, nil, "loss")
+			local awardedStars = 0
 			state.gameEnded = true
 			state.gameplayInputLocked = true
 			state.streak = 0
@@ -3436,8 +3313,7 @@ function RuntimeHelpers.completeSelection()
 		})
 	end
 
-	local comboMultiplier = getModeConfig().startTime and RuntimeHelpers.advanceTimedCombo(getWordColor(matchedWord.word)) or 1
-	local wordScore = RuntimeHelpers.calculateWordScore(matchedWord.word) * comboMultiplier
+	local wordScore = RuntimeHelpers.calculateWordScore(matchedWord.word)
 	addScore(wordScore)
 	if not state.duelActive then
 		applyLocalAction("WordFound")
@@ -3539,9 +3415,6 @@ function RuntimeHelpers.completeSelection()
 
 		state.gameEnded = true
 		state.gameplayInputLocked = true
-		state.timedRunActive = false
-		state.timedCountdownPending = false
-		state.freezeTimeEndsAt = 0
 		updateHud()
 		local outcomeSummaryContext = {
 			isLoss = false,
@@ -4064,26 +3937,7 @@ loadPreparedPuzzle = function(puzzleData, targetIndex, chosenSeed, resumeBoardSt
 	state.wrongDragCount = 0
 	state.wordRowsRevealPending = true
 	state.boardStartCountdownPending = not state.duelActive
-	if getModeConfig().startTime then
-		local boardTimeLimit = RuntimeHelpers.getPuzzleTimeLimit(puzzleData, state.mode)
-		state.timedOriginalDurationSeconds = boardTimeLimit
-		state.timedDurationSeconds = boardTimeLimit
-		state.timedSecondsLeft = boardTimeLimit
-		state.lastTimerWholeSecond = boardTimeLimit
-		state.timedStartCueEndsAt = 0
-		state.timedTimerVisualKey = ""
-		state.timedDeadline = 0
-		state.timedStartTick = 0
-		state.timedRunActive = false
-		state.timedRunEnding = false
-		state.timedCountdownPending = true
-		state.timeBoostUsed = false
-		state.freezeTimeUsed = false
-		state.freezeTimeEndsAt = 0
-		if not state.duelActive then
-			state.gameplayInputLocked = true
-		end
-	elseif not state.duelActive then
+	if not state.duelActive then
 		state.gameplayInputLocked = true
 	end
 	local currentBoardToken = state.boardToken
@@ -4099,28 +3953,6 @@ loadPreparedPuzzle = function(puzzleData, targetIndex, chosenSeed, resumeBoardSt
 		if not state.duelActive then
 			state.gameplayInputLocked = false
 		end
-		if getModeConfig().startTime then
-			local remainingTime = math.max(1, math.floor(tonumber(resumeBoardState.remainingTime) or state.timedOriginalDurationSeconds or 1))
-			local freezeTimeRemaining = math.max(0, tonumber(resumeBoardState.freezeTimeRemaining) or 0)
-			state.timeBoostUsed = resumeBoardState.timeBoostUsed == true
-			state.freezeTimeUsed = resumeBoardState.freezeTimeUsed == true
-			state.timedDurationSeconds = state.timedOriginalDurationSeconds + (state.timeBoostUsed and RuntimeHelpers.getExtraTimeAmount() or 0)
-			state.timedSecondsLeft = remainingTime
-			state.lastTimerWholeSecond = remainingTime
-			state.timedStartCueEndsAt = 0
-			state.timedTimerVisualKey = ""
-			state.timedCountdownPending = false
-			state.freezeTimeEndsAt = tick() + freezeTimeRemaining
-			if freezeTimeRemaining > 0 then
-				state.timedRunActive = false
-				state.timedStartTick = 0
-				state.timedDeadline = 0
-			else
-				state.timedRunActive = true
-				state.timedStartTick = tick()
-				state.timedDeadline = state.timedStartTick + remainingTime
-			end
-		end
 	end
 	resetWordListUi()
 	updateWordsLabel()
@@ -4134,7 +3966,7 @@ loadPreparedPuzzle = function(puzzleData, targetIndex, chosenSeed, resumeBoardSt
 		level = targetIndex,
 		words = puzzleData and #puzzleData.words or 0,
 	})
-	RuntimeHelpers.beginTimedCountdownIfNeeded(currentBoardToken)
+	RuntimeHelpers.beginBoardCountdownIfNeeded(currentBoardToken)
 
 	if state.duelActive then
 		setStatus("Finish before your opponent.", getModeConfig().accent)
@@ -4144,8 +3976,6 @@ loadPreparedPuzzle = function(puzzleData, targetIndex, chosenSeed, resumeBoardSt
 		setStatus("Each board rolls a random theme.", getModeConfig().accent)
 	elseif state.mode == "Daily" then
 		setStatus("One massive board today. Clear it before reset.", getModeConfig().accent)
-	elseif getModeConfig().startTime then
-		setStatus("Beat the timer before the board expires.", getModeConfig().accent)
 	elseif state.mode == "Backwards" then
 		setStatus("Every word is hidden backwards on this board.", getModeConfig().accent)
 	elseif state.mode == "Mega" then
@@ -4278,9 +4108,6 @@ function RuntimeHelpers.handleDuelMatchResult(payload)
 	state.gameplayInputLocked = true
 	state.duelServerStarted = false
 	state.duelLocalCountdownFinished = true
-	state.timedRunActive = false
-	state.timedCountdownPending = false
-	state.freezeTimeEndsAt = 0
 	state.duelActive = false
 	state.duelMatchId = nil
 	state.duelMyProgress = payload.isWinner and 100 or state.duelMyProgress
@@ -4346,49 +4173,11 @@ function RuntimeHelpers.beginModeRun(mode, skipExit, startingClassicLevel)
 	state.sessionScore = 0
 	state.puzzlesCleared = 0
 	state.streak = modeStreak
-	state.timedComboMultiplier = 1
-	state.timedComboExpiresAt = 0
-	state.timedComboPausedRemaining = 0
-	state.timedComboAccent = nil
 	state.gameEnded = false
 	clearHint()
 	hideSummary()
-
-	if modeConfig.startTime then
-		state.timedOriginalDurationSeconds = 0
-		state.timedDurationSeconds = 0
-		state.timedStartTick = 0
-		state.timedDeadline = 0
-		state.timedSecondsLeft = 0
-		state.lastTimerWholeSecond = nil
-		state.timedStartCueEndsAt = 0
-		state.timedTimerVisualKey = ""
-		state.timedCountdownPending = true
-		state.timedRunActive = false
-		state.timedRunEnding = false
-		state.boardStartCountdownPending = false
-		state.timeBoostUsed = false
-		state.freezeTimeUsed = false
-		state.freezeTimeEndsAt = 0
-		state.gameplayInputLocked = true
-	else
-		state.timedDeadline = 0
-		state.timedStartTick = 0
-		state.timedOriginalDurationSeconds = 0
-		state.timedDurationSeconds = 0
-		state.timedSecondsLeft = 0
-		state.lastTimerWholeSecond = nil
-		state.timedStartCueEndsAt = 0
-		state.timedTimerVisualKey = ""
-		state.timedCountdownPending = false
-		state.timedRunActive = false
-		state.timedRunEnding = false
-		state.boardStartCountdownPending = false
-		state.timeBoostUsed = false
-		state.freezeTimeUsed = false
-		state.freezeTimeEndsAt = 0
-		state.gameplayInputLocked = false
-	end
+	state.boardStartCountdownPending = false
+	state.gameplayInputLocked = false
 
 	state.puzzleIndex = (mode == "Classic" and (resolvedClassicLevel or RuntimeHelpers.getClassicContinueLevel()))
 		or (dailyInfo and dailyInfo.level or modeConfig.startIndex)
@@ -4482,83 +4271,6 @@ function RuntimeHelpers.bindClassicLevelsFrameActions()
 	end
 end
 
-TimedProduct = TimedProductRuntime.create({
-	state = state,
-	Dependencies = Dependencies,
-	RuntimeHelpers = RuntimeHelpers,
-	remotes = remotes,
-	player = player,
-	MarketplaceService = MarketplaceService,
-	getModeConfig = function()
-		return getModeConfig()
-	end,
-	showDesktopAlert = function(title, body, alertType, options)
-		return showDesktopAlert(title, body, alertType, options)
-	end,
-	updateHud = function()
-		updateHud()
-	end,
-	syncBoardProgress = function()
-		syncBoardProgress()
-	end,
-	refreshActionButtons = function()
-		refreshActionButtons()
-	end,
-	applySnapshot = function(snapshot)
-		applySnapshot(snapshot)
-	end,
-})
-
-endTimedRun = function()
-	if state.gameEnded or not getModeConfig().startTime or state.timedRunEnding then
-		return
-	end
-
-	local timeoutBoardState = RuntimeHelpers.buildBoardProgressPayload(true)
-	local awardedStars = RuntimeHelpers.calculateAwardedStars(false, 0, "timeout")
-
-	state.timedRunEnding = true
-	state.timedRunActive = false
-	state.timedCountdownPending = false
-	state.timedStartCueEndsAt = 0
-	state.timedTimerVisualKey = ""
-	state.gameplayInputLocked = false
-	state.timedDeadline = 0
-	state.freezeTimeEndsAt = 0
-	state.gameEnded = true
-	state.streak = 0
-	applyLocalAction("BoardLost", {
-		mode = state.mode,
-		level = state.puzzleIndex,
-		reason = "timeout",
-		stars = awardedStars,
-	})
-	RuntimeHelpers.printAwardedStars(awardedStars)
-	trackServerAction("BoardLost", {
-		mode = state.mode,
-		level = state.puzzleIndex,
-		words = state.currentPuzzle and #state.currentPuzzle.words or 0,
-		reason = "timeout",
-		stars = awardedStars,
-		boardState = timeoutBoardState,
-	})
-	trackServerAction("BoardStateCleared", {})
-	updateHud()
-	clearDrag()
-	showSummary("YOU LOST", "Time ran out.", "CONTINUE", COLORS.error, function()
-		hideSummary()
-		startMode(state.mode)
-	end, {
-		isLoss = true,
-		preserveButtonTransparency = true,
-		stars = awardedStars,
-		totalWins = state.totalStars,
-		streak = state.streak,
-		startPuzzlePieces = math.max(0, math.floor((getSnapshot().inventory and getSnapshot().inventory.puzzlePieces) or 0)),
-		previewPuzzlePieces = 0,
-	})
-end
-
 return {
 	chooseModeLevelIndex = chooseModeLevelIndex,
 	buildPuzzleDefinition = buildPuzzleDefinition,
@@ -4580,7 +4292,6 @@ return {
 	startMode = startMode,
 	handleMenuPlayPressed = handleMenuPlayPressed,
 	startClassicLevelFromSelector = startClassicLevelFromSelector,
-	endTimedRun = endTimedRun,
 	setStatus = setStatus,
 	getWordColor = getWordColor,
 	assignWordColors = assignWordColors,
@@ -4598,7 +4309,6 @@ return {
 	clearHintWord = clearHintWord,
 	nextHintTarget = nextHintTarget,
 	applyResumeStateToCurrentPuzzle = applyResumeStateToCurrentPuzzle,
-	timedProduct = TimedProduct,
 }
 end
 
