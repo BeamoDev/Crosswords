@@ -11,7 +11,7 @@ local DEFAULT_META_CONFIG = {
 	LEADERBOARD = {
 		WordsFoundStoreName = "WordHuntQueueWordsFound_v1",
 		DuelWinsStoreName = "WordHuntQueueDuelWins_v1",
-		RefreshInterval = 120,
+		RefreshInterval = 300,
 		WriteInterval = 60,
 	},
 }
@@ -19,7 +19,7 @@ local DEFAULT_META_CONFIG = {
 local MetaConfig = Utility.Resolve("GameConfig", {
 	Meta = DEFAULT_META_CONFIG,
 }).Meta
-local refreshInterval = math.max(60, math.floor(tonumber(MetaConfig.LEADERBOARD.RefreshInterval) or 120))
+local refreshInterval = math.max(60, math.floor(tonumber(MetaConfig.LEADERBOARD.RefreshInterval) or 300))
 local writeInterval = math.max(30, math.floor(tonumber(MetaConfig.LEADERBOARD.WriteInterval) or 60))
 
 local leaderboardDefinitions = {
@@ -77,7 +77,7 @@ local function resolvePlayerDisplay(userId)
 	return username, thumbnail
 end
 
-local function sortAndRankEntries(entries)
+local function sortAndRankEntries(entries, limit)
 	table.sort(entries, function(a, b)
 		if (a.Score or 0) ~= (b.Score or 0) then
 			return (a.Score or 0) > (b.Score or 0)
@@ -86,7 +86,7 @@ local function sortAndRankEntries(entries)
 	end)
 
 	local ranked = {}
-	for index = 1, math.min(3, #entries) do
+	for index = 1, math.min(limit or 20, #entries) do
 		local entry = entries[index]
 		entry.Rank = index
 		table.insert(ranked, entry)
@@ -95,7 +95,7 @@ local function sortAndRankEntries(entries)
 	return ranked
 end
 
-local function mergeEntries(storedEntries, liveEntries)
+local function mergeEntries(storedEntries, liveEntries, limit)
 	local merged = {}
 	local byUserId = {}
 
@@ -138,7 +138,7 @@ local function mergeEntries(storedEntries, liveEntries)
 		end
 	end
 
-	return sortAndRankEntries(merged)
+	return sortAndRankEntries(merged, limit)
 end
 
 local function getDefinition(categoryKey)
@@ -219,7 +219,9 @@ local function broadcastCategory(categoryKey)
 	end
 
 	if legacyUpdateEvent then
-		legacyUpdateEvent:FireAllClients(categoryKey, cache.entries, cache.updatedAt, cache.revision or 0)
+		for _, player in ipairs(Players:GetPlayers()) do
+			legacyUpdateEvent:FireClient(player, categoryKey, cache.entries, cache.updatedAt, cache.revision or 0, SocialService.GetPersonalEntry(player, categoryKey))
+		end
 	end
 
 end
@@ -235,7 +237,7 @@ local function refreshCategory(categoryKey)
 	cache.refreshing = true
 	local entries = {}
 	local ok, page = pcall(function()
-		return getStore(categoryKey):GetSortedAsync(false, 3):GetCurrentPage()
+		return getStore(categoryKey):GetSortedAsync(false, 100):GetCurrentPage()
 	end)
 
 	if ok and page then
@@ -256,6 +258,11 @@ local function refreshCategory(categoryKey)
 		entries = cache.entries
 	end
 
+	if ok and page then
+		cache.rankEntries = entries
+		cache.rankComplete = #page < 100
+		cache.rankCutoff = #page > 0 and tonumber(page[#page].value) or 0
+	end
 	cache.entries = mergeEntries(entries, getLiveEntries(categoryKey))
 	for _, entry in ipairs(cache.entries) do
 		entry.Username, entry.Thumbnail = resolvePlayerDisplay(entry.UserId)
@@ -274,6 +281,29 @@ end
 
 function SocialService.RefreshCategory(categoryKey)
 	return refreshCategory(categoryKey)
+end
+
+-- Shared top-100 cache only: no per-player reads, pagination or identity lookups.
+function SocialService.GetPersonalEntry(player, categoryKey)
+	local definition = getDefinition(categoryKey)
+	if not definition then return nil end
+	local score = math.max(0, math.floor(tonumber(definition.getValueFromSnapshot(liveSnapshots[player.UserId])) or 0))
+	local result = {UserId=player.UserId, Username=player.Name, Score=score, RankText="--"}
+	local cache = getCacheState(categoryKey)
+	if not cache.rankEntries or score <= 0 then return result end
+	local cutoff = cache.rankCutoff or 0
+	if not cache.rankComplete and score <= cutoff then
+		if score < cutoff then result.RankText = "100+" end
+		return result
+	end
+	local ranked = mergeEntries(cache.rankEntries, getLiveEntries(categoryKey), math.huge)
+	for _, entry in ipairs(ranked) do
+		if entry.UserId == player.UserId and entry.Score == score then
+			result.Rank, result.RankText = entry.Rank, "#" .. entry.Rank
+			break
+		end
+	end
+	return result
 end
 
 function SocialService.GetCache()
@@ -358,7 +388,7 @@ function SocialService.Initialize()
 			local entries, updatedAt = SocialService.GetCategoryCache(categoryKey)
 			local cache = getCacheState(categoryKey)
 			cache.revision = (cache.revision or 0) + 1
-			legacyUpdateEvent:FireClient(player, categoryKey, entries, updatedAt, cache.revision)
+			legacyUpdateEvent:FireClient(player, categoryKey, entries, updatedAt, cache.revision, SocialService.GetPersonalEntry(player, categoryKey))
 		end
 	end)
 

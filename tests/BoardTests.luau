@@ -829,6 +829,11 @@ for _, name in ipairs({"Countdown", "CustomFrame", "DailyReward", "DuelOutcome",
 end
 local leaderboardLauncher = add(shopLauncher.Parent, "TextButton", "Leaderboard")
 local leaderboardFrame = modalFrames:FindFirstChild("Leaderboards")
+do
+ local you = add(leaderboardFrame,"Frame","You")
+ for _, name in ipairs({"Username","Data","Place"}) do add(you,"TextLabel",name) end
+ add(you,"ImageLabel","Mugshot")
+end
 leaderboardFrame:FindFirstChild("Frame"):Destroy()
 local leaderboardPanels = {}
 for _, category in ipairs({ "WordsFound", "1v1Wins" }) do
@@ -1108,8 +1113,21 @@ local wordsRanking = {
 	{ UserId=88, Username="Fourth", Score=600 },
 }
 local winsRanking = { { UserId=99, Username="DuelWinner", Score=42, Thumbnail="headshot:99" } }
-modalUi:applyLeaderboardUpdate("WordsFound", wordsRanking, 10)
-modalUi:applyLeaderboardUpdate("1v1Wins", winsRanking, 11)
+modalUi:applyLeaderboardUpdate("WordsFound", wordsRanking, 10, {UserId=1,Score=23,RankText="#18"})
+modalUi:applyLeaderboardUpdate("1v1Wins", winsRanking, 11, {UserId=1,Score=4,RankText="100+"})
+;(function()
+ local you = leaderboardFrame:FindFirstChild("You")
+ check(you.Visible and you:FindFirstChild("Data").Text == "23" and you:FindFirstChild("Place").Text == "#18", "You row shows personal Words Found score and rank")
+ modalUi:selectLeaderboard("1v1Wins")
+ check(you:FindFirstChild("Data").Text == "4" and you:FindFirstChild("Place").Text == "100+", "You row follows the selected Duel wins tab")
+ check(you:FindFirstChild("Mugshot").Image == "rbxthumb://type=AvatarHeadShot&id=1&w=150&h=150", "You row always displays the local account headshot")
+ local originalSnapshot = modalUi.ctx.getSnapshot
+ modalUi.ctx.getSnapshot = function() return {progression={wordsFound=24,duel={wins=5}}} end
+ modalUi:renderLeaderboard()
+ check(you:FindFirstChild("Data").Text == "5" and you:FindFirstChild("Place").Text == "--", "Changed personal totals cannot display a stale rank")
+ modalUi.ctx.getSnapshot = originalSnapshot
+ modalUi:selectLeaderboard("WordsFound")
+end)()
 local medals = {
 	{ "One", rbx.Color3.fromRGB(255,214,92), rbx.Color3.fromRGB(177,128,24) },
 	{ "Two", rbx.Color3.fromRGB(208,220,233), rbx.Color3.fromRGB(109,124,145) },
@@ -1151,8 +1169,31 @@ for category in pairs(leaderboardPanels) do
 	advance(0.36)
 	check(not leaderboardFrame.Visible, "Direct Leaderboards.Quit closes the whole modal from either tab")
 end
+;(function()
+ local template = add(assets,"Frame","LeaderboardTemplate")
+ for _, name in ipairs({"Username","Data","Place"}) do add(template,"TextLabel",name) end
+ local portrait = add(template,"ImageLabel","Mugshot")
+ portrait.BackgroundColor3 = rbx.Color3.fromRGB(80,150,220)
+ add(portrait,"UIStroke","UIStroke").Color = rbx.Color3.fromRGB(20,80,120)
+ modalUi.elements.leaderboardTemplate = template
+ local entries = {}
+ for i=1,25 do entries[i]={UserId=100+i,Username="Rank"..i,Score=1000-i} end
+ for _, category in ipairs({"WordsFound","1v1Wins"}) do
+  local container = add(leaderboardPanels[category],"ScrollingFrame","Container")
+  add(container,"UIListLayout","UIListLayout")
+  modalUi:applyLeaderboardUpdate(category,entries,50)
+  check(#container:GetChildren() == 21 and container.AutomaticCanvasSize == rbx.Enum.AutomaticSize.Y, "Leaderboard clones twenty rows and preserves the scrolling layout")
+  local last = container:FindFirstChild("LeaderboardRank_20")
+  check(last.LayoutOrder == 20 and last:FindFirstChild("Place").Text == "#20" and last:FindFirstChild("Username").Text == "Rank20", "Twentieth row displays its correct rank and identity")
+  check(last:FindFirstChild("Mugshot").BackgroundColor3 == portrait.BackgroundColor3, "Ranks below third preserve the template colors")
+  modalUi:renderLeaderboard()
+  check(container:FindFirstChild("LeaderboardRank_20") == last and #container:GetChildren() == 21, "Refresh reuses rows without duplicates")
+  modalUi:applyLeaderboardUpdate(category,{entries[2]},51)
+  check(#container:GetChildren() == 2 and container:FindFirstChild("LeaderboardRank_1"):FindFirstChild("Username").Text == "Rank2", "Shrinking rankings remove stale rows and update retained identities")
+ end
+end)()
 -- One shared backdrop follows real direct-child visibility, including external changes.
-(function()
+;(function()
 	modalUi:hideAllFrames()
 	advance(0.7)
 	check(modalFrames.BackgroundTransparency == 1, "Backdrop is fully transparent with every modal closed")

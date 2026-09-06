@@ -564,6 +564,7 @@ function DuelService:GetPlayerList(requestingPlayer)
 		return string.lower(left.username or "") < string.lower(right.username or "")
 	end)
 
+	while #list > 8 do table.remove(list) end
 	return list
 end
 

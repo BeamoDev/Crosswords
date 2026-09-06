@@ -51,7 +51,7 @@ local taskMock = {
 }
 local mockRandom = { new = function() return {
 	NextInteger = function(_, low, high)
-		if low == 2 and (high == 10 or high == 11) then
+		if low == 2 and (high == 3 or high == 6) then
 			if populationChoice == "max" then return high end
 			if populationChoice == "mid" then return math.floor((low + high) / 2) end
 		end
@@ -238,7 +238,7 @@ check(botProgress.opponentProgress == 10 and profiles[1].xp == beforeXP, "Stalle
 check(profiles[1].progression.wordsFound == beforeWords and profiles[botId] == nil, "Bot solves create no profiles or human stats")
 playerCount = 12
 advance(2)
-check(#duel:GetPlayerList(b) == 11, "Full human server replaces spare bot list entries")
+check(#duel:GetPlayerList(b) == 8, "Full human server shows at most eight real opponents")
 check(a:GetAttribute("DuelBusy") and last("DuelMatch",a,"countdown").matchId == botCountdown.matchId, "Population changes do not remove an active bot opponent")
 for _, current in ipairs(botPuzzle.words) do
 	duel:ReportProgress(a,{word=current,path=botPuzzle.placedWordsByWord[current].path})
@@ -284,10 +284,10 @@ advance(2)
 check(#duel:GetPlayerList(a) == 2, "A lone player can see only two bot opponents")
 populationChoice = "max"
 advance(121)
-check(#duel:GetPlayerList(a) == 11, "Later population roll can fill all eleven spare seats")
+check(#duel:GetPlayerList(a) == 6, "Lone-player population can roll up to six companions")
 populationChoice = "mid"
 advance(121)
-check(#duel:GetPlayerList(a) == 6, "Another population roll produces six bots")
+check(#duel:GetPlayerList(a) == 4, "Another population roll produces four bots")
 populationChoice = "min"
 advance(121)
 check(#duel:GetPlayerList(a) == 2, "Population can shrink again without a player joining or leaving")
@@ -340,6 +340,20 @@ do
  check(last("DuelMatch",a,"countdown").opponentId == botId and last("DuelMatch",a,"countdown").matchId ~= botMatch.matchId, "Bot agrees and rematches with the same identity")
  duel:AbandonMatch(a)
  advance(10)
+end
+do
+	playerCount = 6
+	advance(2)
+	local list = duel:GetPlayerList(a)
+	local count = 0
+	for _, entry in ipairs(list) do if entry.isBot then count += 1 end end
+	check(count <= 1 and #list <= 6, "Six real players receive at most one bot")
+	for realCount=1,12 do
+		local minimum, maximum = botModule.PopulationRange(realCount)
+		check(minimum <= maximum and maximum + math.min(8,realCount-1) <= 8, "Population range respects eight listed opponents")
+	end
+	playerCount = 1
+	advance(10)
 end
 local finalBot = duel:GetPlayerList(a)[1].userId
 check(duel:SendChallenge(a, finalBot, "Duel"), "Bot countdown begins before shutdown")

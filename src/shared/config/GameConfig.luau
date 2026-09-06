@@ -37,7 +37,7 @@ Meta.GIFT = {
 Meta.LEADERBOARD = {
 	WordsFoundStoreName = "WordHuntQueueWordsFound_v1",
 	DuelWinsStoreName = "WordHuntQueueDuelWins_v1",
-	RefreshInterval = 120,
+	RefreshInterval = 300,
 	WriteInterval = 60,
 }
 

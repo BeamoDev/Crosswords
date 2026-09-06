@@ -24,7 +24,7 @@ local dataStores = { GetOrderedDataStore = function(_, name)
 		local store = { values = initial[name] or {} }
 		function store:GetSortedAsync(ascending, limit)
 			reads += 1
-			check(not ascending and limit == 3, "Global queries request the three highest scores")
+			check(not ascending and limit == 100, "One bounded global read supplies podium and personal ranks")
 			if failRead then error("expected leaderboard read failure") end
 			local page = {}
 			for key, value in pairs(self.values) do table.insert(page, {key=key,value=value}) end
@@ -76,13 +76,17 @@ social.MarkSnapshotDirty(b,snapshot(300,60))
 social.MarkSnapshotDirty(player(-10),snapshot(99999,99999))
 social.MarkSnapshotDirty(player(3,false),snapshot(99999,99999))
 social.Initialize()
-check(#sent == 2, "Initialization broadcasts both independent categories")
+check(#sent == 4, "Initialization sends both categories with personal ranks to each player")
 local entries = social.GetCategoryCache("WordsFound")
-check(#entries == 3 and entries[1].UserId == 1 and entries[1].Score == 700 and entries[2].UserId == 101 and entries[3].UserId == 2, "Words ranks combine trusted live stats with global top three and deterministic ties")
+check(#entries == 6 and entries[1].UserId == 1 and entries[1].Score == 700 and entries[2].UserId == 101 and entries[3].UserId == 2, "Words ranks combine trusted live stats with global top three and deterministic ties")
 local wins = social.GetCategoryCache("1v1Wins")
 check(wins[1].UserId == 2 and wins[1].Score == 60 and wins[2].UserId == 104, "Duel wins do not rank by level or words found")
 check(entries[1].Thumbnail == "headshot:1" and entries[1].Username == "User1", "Ranked identities use the actual Roblox account")
 check(#social.GetCategoryCache("Solves") == 0, "Unknown retired category returns no data")
+check(social.GetPersonalEntry(a,"WordsFound").Rank == 1 and social.GetPersonalEntry(a,"1v1Wins").Rank == 5, "Personal ranks are global and category-specific beyond the podium")
+local cachedReads = reads
+for _=1,20 do social.GetPersonalEntry(a,"WordsFound") end
+check(reads == cachedReads, "Personal rank lookups perform no DataStore reads")
 local request = storage.Remotes.Events[contract.Legacy.LeaderboardRequest].OnServerEvent.callbacks[1]
 local readsBefore, sentBefore = reads, #sent
 request(a)
@@ -119,9 +123,20 @@ check(retained[1].UserId == prior[1].UserId and retained[1].Score == prior[1].Sc
 failRead = false
 local delays = {}
 for _, thread in ipairs(loops) do local ok,delay=coroutine.resume(thread) assert(ok,delay) delays[delay]=thread end
-check(delays[120] ~= nil and delays[60] ~= nil, "Global refresh loop waits two minutes and writes run every minute")
+check(delays[300] ~= nil and delays[60] ~= nil, "Global refresh loop waits five minutes and writes run every minute")
 readsBefore = reads
-local ok, delay = coroutine.resume(delays[120])
-check(ok and delay == 120 and reads == readsBefore + 2, "Each scheduled refresh reloads both global rankings and broadcasts")
+local ok, delay = coroutine.resume(delays[300])
+check(ok and delay == 300 and reads == readsBefore + 2, "Each scheduled refresh reloads both global rankings and broadcasts")
 check(warnings >= 3, "Failure and retry checks exercised real warning paths")
+stores[wordsStore].values = {}
+for index=1,120 do stores[wordsStore].values[tostring(1000+index)] = 1000-index end
+social.MarkSnapshotDirty(b,snapshot(950,60))
+social.RefreshCategory("WordsFound")
+check(#social.GetCategoryCache("WordsFound") == 20, "Leaderboard publishes the top twenty entries")
+check(social.GetPersonalEntry(b,"WordsFound").Rank == 50, "Top-100 scan resolves an exact personal rank below third place with deterministic ties")
+social.MarkSnapshotDirty(b,snapshot(899,60))
+check(social.GetPersonalEntry(b,"WordsFound").Rank == nil and social.GetPersonalEntry(b,"WordsFound").RankText == "100+", "Outside cached ranks show a lower bound instead of guessing")
+social.MarkSnapshotDirty(b,snapshot(900,60))
+check(social.GetPersonalEntry(b,"WordsFound").RankText == "--", "Ties at a truncated page boundary never invent an exact rank")
+check(social.GetPersonalEntry(player(99),"WordsFound").RankText == "--", "Missing or zero scores have no fabricated placement")
 print("LEADERBOARD_TESTS_PASSED=" .. checks)

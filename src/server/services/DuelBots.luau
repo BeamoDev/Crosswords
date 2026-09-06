@@ -58,8 +58,21 @@ function DuelBots.new(config)
 	return self
 end
 
+-- Small companion groups taper as real opponents become available.
+function DuelBots.PopulationRange(realCount)
+	if realCount <= 0 or realCount >= 8 then return 0, 0 end
+	if realCount == 1 then return 2, 6 end
+	if realCount == 2 then return 2, 3 end
+	if realCount <= 4 then return 1, 2 end
+	return 0, 1
+end
+
 function DuelBots:Refresh()
-	self.pool:Step(#Players:GetPlayers(), self.lobby, os.clock())
+	local realCount = #Players:GetPlayers()
+	local minimum, maximum = DuelBots.PopulationRange(realCount)
+	self.pool.config.MinBots = minimum
+	self.pool.config.ServerSize = realCount + math.min(maximum, math.max(0, self.capacity - realCount))
+	return self.pool:Step(realCount, self.lobby, os.clock())
 end
 
 function DuelBots:List()
@@ -68,7 +81,10 @@ function DuelBots:List()
 		if bot.member.avatarReady then table.insert(list, bot.member) end
 	end
 	table.sort(list, function(a, b) return a.userId > b.userId end)
-	while #list > math.max(0, self.capacity - #Players:GetPlayers()) do table.remove(list) end
+	local realCount = #Players:GetPlayers()
+	local _, maximum = DuelBots.PopulationRange(realCount)
+	local limit = math.min(maximum, math.max(0, self.capacity - realCount), math.max(0, 8 - (realCount - 1)))
+	while #list > limit do table.remove(list) end
 	return list
 end
 
@@ -128,7 +144,7 @@ function DuelBots:Step(onProgress)
 			human.completed = human.count >= match.boardInfo.wordCount
 		end
 	end
-	local _, changed = self.pool:Step(#Players:GetPlayers(), self.lobby, os.clock())
+	local _, changed = self:Refresh()
 	for _, entry in pairs(self.matches) do
 		if changed[entry.round] then onProgress(entry.match) end
 	end

@@ -485,6 +485,7 @@ function ProgressionController.new(ctx)
 	self.dailyClaimPending = false
 	self.dailyNextRefreshAt = 0
 	self.leaderboardEntries = {}
+	self.leaderboardPersonal = {}
 	self.leaderboardRevisions = {}
 	self.leaderboardCategory = "WordsFound"
 	self.verifyPromptShownThisSession = false
@@ -917,6 +918,7 @@ function ProgressionController:resolveElements(root)
 
 	local leaderboardFrame = frames and (frames:FindFirstChild("Leaderboards") or frames:FindFirstChild("Leaderboard")) or nil
 	local leaderboardRoot = leaderboardFrame
+	local leaderboardAssets = ReplicatedStorage:FindFirstChild("Assets") or ReplicatedStorage:FindFirstChild("assets")
 	local dailyFrame = frames and (frames:FindFirstChild("DailyRewards") or frames:FindFirstChild("DailyReward") or frames:FindFirstChild("Daily")) or nil
 	local dailyRoot = dailyFrame
 	local settingsFrame = frames and frames:FindFirstChild("Settings") or nil
@@ -1042,6 +1044,8 @@ function ProgressionController:resolveElements(root)
 		statsTimedSolve = statsContainer and findTextObject(findDescendantByNames(statsContainer, { "TimedSolve" }, nil) or statsContainer, { "Data", "TextLabel" }) or nil,
 		statsXP = statsContainer and findTextObject(findDescendantByNames(statsContainer, { "XP" }, nil) or statsContainer, { "Data", "TextLabel" }) or nil,
 		leaderboardFrame = leaderboardFrame,
+		leaderboardTemplate = leaderboardAssets and leaderboardAssets:FindFirstChild("LeaderboardTemplate"),
+		leaderboardYou = leaderboardRoot and leaderboardRoot:FindFirstChild("You"),
 		leaderboardPanels = {
 			WordsFound = leaderboardRoot and leaderboardRoot:FindFirstChild("WordsFound") or nil,
 			["1v1Wins"] = leaderboardRoot and leaderboardRoot:FindFirstChild("1v1Wins") or nil,
@@ -1406,28 +1410,63 @@ function ProgressionController:selectLeaderboard(category)
 	self:renderLeaderboard()
 end
 
-function ProgressionController:applyLeaderboardUpdate(category, entries, revision)
+function ProgressionController:applyLeaderboardUpdate(category, entries, revision, personal)
 	if category ~= "WordsFound" and category ~= "1v1Wins" then return end
 	if type(entries) ~= "table" or type(revision) ~= "number" then return end
 	if revision <= (self.leaderboardRevisions[category] or -1) then return end
 	self.leaderboardRevisions[category] = revision
 	self.leaderboardEntries[category] = entries
+	if type(personal) == "table" and personal.UserId == player.UserId then self.leaderboardPersonal[category] = personal end
 	self:renderLeaderboard()
 end
 
 function ProgressionController:renderLeaderboard()
+	local you = self.elements.leaderboardYou
+	if you then
+		local snapshot = self.ctx.getSnapshot and self.ctx.getSnapshot()
+		local progression = snapshot and snapshot.progression
+		local personal = self.leaderboardPersonal[self.leaderboardCategory]
+		local score = progression and (self.leaderboardCategory == "1v1Wins" and (progression.duel or {}).wins or progression.wordsFound)
+		score = score or (personal and personal.Score) or 0
+		you.Visible = true
+		setText(you:FindFirstChild("Username"), player.Name)
+		setText(you:FindFirstChild("Data"), tostring(score))
+		setText(you:FindFirstChild("Place"), personal and personal.Score == score and personal.RankText or "--")
+		local mugshot = you:FindFirstChild("Mugshot")
+		if mugshot then Effects.SetPortraitImage(mugshot, string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150",player.UserId)) end
+	end
 	for category, panel in pairs(self.elements.leaderboardPanels or {}) do
 		setVisible(panel, category == self.leaderboardCategory)
 		local entries = self.leaderboardEntries[category] or {}
-		for index, medal in ipairs(LEADERBOARD_MEDALS) do
-			local slot = panel:FindFirstChild(medal.name)
-			if not slot then continue end
+		local container = panel:FindFirstChild("Container")
+		if container and container:IsA("ScrollingFrame") then
+			container.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			local layout = container:FindFirstChildOfClass("UIListLayout")
+			if layout then layout.SortOrder = Enum.SortOrder.LayoutOrder end
+		end
+		for index = 1, container and 20 or 3 do
+			local medal = LEADERBOARD_MEDALS[index]
 			local entry = entries[index]
+			local slot
+			if container then
+				local name = "LeaderboardRank_" .. index
+				slot = container:FindFirstChild(name)
+				if not entry then
+					if slot then slot:Destroy() end
+					continue
+				end
+				if not slot and self.elements.leaderboardTemplate then
+					slot = self.elements.leaderboardTemplate:Clone()
+					slot.Name, slot.Parent = name, container
+				end
+				if slot then slot.Visible, slot.LayoutOrder = true, index end
+			else slot = panel:FindFirstChild(medal.name) end
+			if not slot then continue end
 			setText(slot:FindFirstChild("Username"), entry and entry.Username or "No player yet")
 			setText(slot:FindFirstChild("Data"), tostring(entry and entry.Score or 0))
 			local place = slot:FindFirstChild("Place")
 			setText(place, "#" .. tostring(index))
-			if place and place:IsA("TextLabel") then
+			if medal and place and place:IsA("TextLabel") then
 				place.TextColor3 = medal.color
 				place.TextStrokeColor3 = medal.stroke
 				local stroke = place:FindFirstChildWhichIsA("UIStroke")
@@ -1435,7 +1474,7 @@ function ProgressionController:renderLeaderboard()
 			end
 			local mugshot = slot:FindFirstChild("Mugshot")
 			if mugshot and (mugshot:IsA("ImageLabel") or mugshot:IsA("ImageButton")) then
-				mugshot.BackgroundColor3 = medal.color
+				if medal then mugshot.BackgroundColor3 = medal.color end
 				mugshot.BackgroundTransparency = 0
 				local stroke = mugshot:FindFirstChildWhichIsA("UIStroke")
 				if not stroke then
@@ -1444,7 +1483,7 @@ function ProgressionController:renderLeaderboard()
 					stroke.Thickness = 2
 					stroke.Parent = mugshot
 				end
-				stroke.Color = medal.stroke
+				if medal then stroke.Color = medal.stroke end
 				local image = entry and entry.Thumbnail or ""
 				if image == "" and entry and (tonumber(entry.UserId) or 0) > 0 then
 					image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", entry.UserId)
@@ -1618,8 +1657,8 @@ function ProgressionController:connectRemoteEvents()
 	end
 
 	if self.remotes.leaderboardUpdate then
-		table.insert(self.connections, self.remotes.leaderboardUpdate.OnClientEvent:Connect(function(category, entries, _updatedAt, revision)
-			self:applyLeaderboardUpdate(category, entries, revision)
+		table.insert(self.connections, self.remotes.leaderboardUpdate.OnClientEvent:Connect(function(category, entries, _updatedAt, revision, personal)
+			self:applyLeaderboardUpdate(category, entries, revision, personal)
 		end))
 	end
 
@@ -1686,6 +1725,7 @@ function ProgressionController:queueVerifyPrompt(snapshot, delaySeconds, require
 end
 
 function ProgressionController:applySnapshot(snapshot)
+	self:renderLeaderboard()
 	self:updateHintText(snapshot)
 	self:updateShopTexts(snapshot)
 	self:updateStats(snapshot)
