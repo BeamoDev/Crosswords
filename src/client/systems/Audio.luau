@@ -3,13 +3,14 @@ local Workspace = game:GetService("Workspace")
 local MusicPlayer = {}
 
 local TRACKS = {
-	"rbxassetid://98673697584976",
-	"rbxassetid://113059501528347",
-	"rbxassetid://101394825740085",
+	"rbxassetid://72191087451264",
+	"rbxassetid://133244468349763",
+	"rbxassetid://9045766377",
+	"rbxassetid://136037234851815",
 }
 
 local currentTrack = 1
-local targetVolume = 0.4
+local targetVolume = 0.2
 local enabled = true
 local initialized = false
 local sound
@@ -78,7 +79,8 @@ end
 function MusicPlayer.SetEnabled(value)
 	enabled = value == true
 	applyVolume()
-	if enabled and sound then
+	-- Profile updates (including hints) must not restart an already playing track.
+	if enabled and sound and not sound.IsPlaying then
 		sound:Play()
 	end
 end

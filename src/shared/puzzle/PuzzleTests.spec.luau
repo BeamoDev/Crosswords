@@ -59,7 +59,7 @@ function PuzzleTests.Run()
 		checks += 1
 	end
 
-	local firstDefinition = PuzzleGenerator.BuildDefinition(1, "Classic", 12345)
+	local firstDefinition = PuzzleGenerator.BuildTutorialDefinition(12345)
 	equal(firstDefinition.gridSize, 4, "Board 1 grid size changed")
 	equal(#firstDefinition.words, 2, "Board 1 word count changed")
 	equal(firstDefinition.words[1], "CAT", "Board 1 first word changed")
@@ -93,35 +93,18 @@ function PuzzleTests.Run()
 	check(not PuzzleEngine.IsComplete({ "CAT", "DOG" }, { CAT = true }), "Completion check accepted a missing word")
 	equal(PuzzleEngine.CalculateWordScore("CAT", 1.5), 90, "Word score changed")
 
-	equal(ProgressionConfig.Stars.CalculateAward("Classic", 1, 0, true), 3, "Zero-hint stars changed")
-	equal(ProgressionConfig.Stars.CalculateAward("Classic", 1, 1, true), 2, "One-hint stars changed")
-	equal(ProgressionConfig.Stars.CalculateAward("Classic", 1, 2, true), 1, "Multi-hint stars changed")
-	equal(ProgressionConfig.Stars.CalculateAward("Classic", 1, 0, false), 0, "Incomplete-board stars changed")
+	check(ProgressionConfig.TimedRewards == nil, "Retired timed reward schedule must stay removed")
 
-	local timestamp = 1800000000
-	local dailyA = ProgressionConfig.Daily.GetDailyIdentity(150, timestamp)
-	local dailyB = ProgressionConfig.Daily.GetDailyIdentity(150, timestamp)
-	equal(dailyA.dayStamp, dailyB.dayStamp, "Daily day identity is not deterministic")
-	equal(dailyA.level, dailyB.level, "Daily level identity is not deterministic")
-	equal(dailyA.seed, dailyB.seed, "Daily seed is not deterministic")
-	check(ProgressionConfig.TimedRewards.GetRewardCount() > 0, "Timed reward schedule is empty")
-
-	check(NetworkContract.ValidateTrackAction("WordFound", {
-		word = "CAT",
-		path = {
-			{ row = 1, column = 1 },
-			{ row = 1, column = 2 },
-			{ row = 1, column = 3 },
-		},
-	}), "Valid WordFound payload was rejected")
+	check(NetworkContract.ValidateTrackAction("ClientFunnel", { step = "HomeLoaded" }), "Valid telemetry accepted")
+	check(not NetworkContract.ValidateTrackAction("WordFound", {}), "Retired progression action rejected")
 	check(not NetworkContract.ValidateTrackAction("UnknownAction", {}), "Unknown remote action was accepted")
 	check(not NetworkContract.IsBoundedValue(math.huge), "Infinite remote number was accepted")
 	check(not NetworkContract.IsBoundedValue(0 / 0), "NaN remote number was accepted")
 
 	local rateState = {}
-	check(NetworkContract.ConsumeRateLimit(rateState, 1, "WordFound", 10), "First action was rate-limited")
-	check(not NetworkContract.ConsumeRateLimit(rateState, 1, "WordFound", 10.01), "Rapid duplicate action bypassed rate limit")
-	check(NetworkContract.ConsumeRateLimit(rateState, 1, "WordFound", 10.1), "Action stayed rate-limited too long")
+	check(NetworkContract.ConsumeRateLimit(rateState, 1, "ClientFunnel", 10), "First action was rate-limited")
+	check(not NetworkContract.ConsumeRateLimit(rateState, 1, "ClientFunnel", 10.01), "Rapid duplicate action bypassed rate limit")
+	check(NetworkContract.ConsumeRateLimit(rateState, 1, "ClientFunnel", 10.3), "Action stayed rate-limited too long")
 
 	return {
 		passed = checks,

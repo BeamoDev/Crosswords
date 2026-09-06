@@ -42,22 +42,7 @@ function Device.GetDeviceClass()
 	return Device.IsTablet() and "Tablet" or "Phone"
 end
 
-local function applyScreenOrientation()
-	if not deviceState.playerGui then
-		return
-	end
-
-	local deviceClass = Device.GetDeviceClass()
-	local targetOrientation = deviceClass == "Tablet" and Enum.ScreenOrientation.Sensor
-		or deviceClass == "Phone" and Enum.ScreenOrientation.Portrait
-		or nil
-	if targetOrientation then
-		pcall(function()
-			deviceState.playerGui.ScreenOrientation = targetOrientation
-		end)
-	end
-end
-
+-- Main is shared by all devices; retain the authored screen orientation.
 local function scheduleViewportChanged()
 	deviceState.viewportToken += 1
 	local token = deviceState.viewportToken
@@ -65,7 +50,6 @@ local function scheduleViewportChanged()
 		if token ~= deviceState.viewportToken then
 			return
 		end
-		applyScreenOrientation()
 		if deviceState.onViewportChanged then
 			deviceState.onViewportChanged(Device.GetDeviceClass())
 		end
@@ -92,7 +76,6 @@ function Device.Init(options)
 	deviceState.initialized = true
 	deviceState.playerGui = options and options.playerGui or nil
 	deviceState.onViewportChanged = options and options.onViewportChanged or nil
-	applyScreenOrientation()
 	bindCurrentCamera()
 	deviceState.cameraChangedConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 		bindCurrentCamera()

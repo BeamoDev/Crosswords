@@ -11,7 +11,8 @@ export type PuzzleDefinition = {
 	level: number?,
 	title: string?,
 	subtitle: string?,
-	gridSize: number,
+	gridSize: number, -- Row count; square definitions can omit gridWidth.
+	gridWidth: number?,
 	words: { string },
 	directions: { DirectionName | DirectionVector }?,
 	seed: number?,
@@ -27,7 +28,8 @@ export type GeneratedPuzzle = {
 	level: number?,
 	seed: number?,
 	mode: string?,
-	gridSize: number,
+	gridSize: number, -- Row count; square definitions can omit gridWidth.
+	gridWidth: number?,
 	letters: { { string } },
 	words: { string },
 	placedWords: { PlacedWord }?,

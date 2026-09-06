@@ -73,13 +73,17 @@ function PuzzleValidator.ValidateDefinition(definition: PuzzleDefinition): (bool
 	if not gridSize or gridSize ~= math.floor(gridSize) or gridSize < 4 or gridSize > 32 then
 		return false, "gridSize must be an integer from 4 to 32"
 	end
+	local gridWidth = definition.gridWidth == nil and gridSize or tonumber(definition.gridWidth)
+	if not gridWidth or gridWidth ~= math.floor(gridWidth) or gridWidth < 4 or gridWidth > 32 then
+		return false, "gridWidth must be an integer from 4 to 32"
+	end
 	if type(definition.words) ~= "table" or #definition.words < 1 or #definition.words > 32 then
 		return false, "words must contain 1 to 32 entries"
 	end
 	local seen = {}
 	for _, value in ipairs(definition.words) do
 		local word = PuzzleValidator.NormalizeWord(value)
-		if not word or #word > gridSize or seen[word] then
+		if not word or #word > math.max(gridSize, gridWidth) or seen[word] then
 			return false, "words must be unique and fit the grid"
 		end
 		seen[word] = true

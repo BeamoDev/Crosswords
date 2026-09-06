@@ -2,7 +2,26 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
-local LegacyRemotes = require(ReplicatedStorage:WaitForChild("shared"):WaitForChild("network"):WaitForChild("NetworkContract")).Legacy
+local NetworkContract = require(ReplicatedStorage:WaitForChild("shared"):WaitForChild("network"):WaitForChild("NetworkContract"))
+local LegacyRemotes = NetworkContract.Legacy
+
+local FavouritePrompt = {}
+local favouriteStarted = false
+function FavouritePrompt.Init()
+	if favouriteStarted then return end
+	favouriteStarted = true
+	local remote = ReplicatedStorage:WaitForChild(NetworkContract.FolderName):WaitForChild(NetworkContract.FavouritePrompt)
+	local prompted = false
+	remote.OnClientEvent:Connect(function()
+		if prompted then return end
+		prompted = true
+		local ok, err = pcall(function()
+			game:GetService("AvatarEditorService"):PromptSetFavorite(game.PlaceId, Enum.AvatarItemType.Asset, true)
+		end)
+		if not ok then warn("[FavouritePrompt] Could not open Roblox prompt:", err) end
+	end)
+	remote:FireServer()
+end
 
 local AutoRejoin = {}
 local localPlayer = Players.LocalPlayer
@@ -622,6 +641,7 @@ end
 
 
 return {
+	FavouritePrompt = FavouritePrompt,
 	AutoRejoin = AutoRejoin,
 	GroupIntro = GroupIntro,
 }

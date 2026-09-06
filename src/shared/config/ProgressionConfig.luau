@@ -1,42 +1,3 @@
-local Daily = {}
-
-local DAY_SECONDS = 24 * 60 * 60
-local MIN_BASE_LEVEL = 5
-
-function Daily.GetCurrentDayStamp(unixTimestamp)
-	local resolvedTimestamp = math.floor(tonumber(unixTimestamp) or os.time())
-	return math.floor(resolvedTimestamp / DAY_SECONDS)
-end
-
-function Daily.GetNextResetTimestamp(unixTimestamp)
-	local dayStamp = Daily.GetCurrentDayStamp(unixTimestamp)
-	return (dayStamp + 1) * DAY_SECONDS
-end
-
-function Daily.GetSecondsUntilReset(unixTimestamp)
-	local resolvedTimestamp = math.floor(tonumber(unixTimestamp) or os.time())
-	return math.max(0, Daily.GetNextResetTimestamp(resolvedTimestamp) - resolvedTimestamp)
-end
-
-function Daily.GetDailyIdentity(levelCount, unixTimestamp)
-	local resolvedLevelCount = math.max(1, math.floor(tonumber(levelCount) or 1))
-	local resolvedTimestamp = math.floor(tonumber(unixTimestamp) or os.time())
-	local dayStamp = Daily.GetCurrentDayStamp(resolvedTimestamp)
-	local minimumLevel = math.min(MIN_BASE_LEVEL, resolvedLevelCount)
-	local span = math.max(1, resolvedLevelCount - minimumLevel + 1)
-	local level = minimumLevel + ((dayStamp * 17 + 11) % span)
-	local seed = ((dayStamp * 104729 + 9187) % 2147483646) + 1
-
-	return {
-		dayStamp = dayStamp,
-		level = level,
-		seed = seed,
-		resetTimestamp = Daily.GetNextResetTimestamp(resolvedTimestamp),
-		secondsUntilReset = Daily.GetSecondsUntilReset(resolvedTimestamp),
-	}
-end
-
-
 -- Gift milestone progression.
 local Gift = {}
 
@@ -118,131 +79,78 @@ function Gift.ResolveClaimMilestone(totalCompleted, lastClaimedMilestone)
 end
 
 
--- Hint-based star awards and durable slot resolution.
-local Levels
-if script then
-	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local sharedFolder = ReplicatedStorage:WaitForChild("shared")
-	Levels = require(sharedFolder:WaitForChild("content"):WaitForChild("PuzzleCatalog"))
-else
-	Levels = require("../content/PuzzleCatalog")
-end
-
-local Stars = {}
-
-local MAX_CLASSIC_LEVEL = math.max(1, #Levels)
-
-local function clampClassicLevel(level)
-	return math.clamp(math.max(1, math.floor(tonumber(level) or 1)), 1, MAX_CLASSIC_LEVEL)
-end
-
-local function getBoardInfo(mode, level)
-	if mode == "Classic" or mode == "Daily" or mode == "Freeplay" or mode == "Backwards" or mode == "Fog" or mode == "OneLife" or mode == "Mega" then
-		return Levels[clampClassicLevel(level)]
-	end
-
-	return Levels[clampClassicLevel(level)]
-end
-
-function Stars.GetModeBucket(mode)
-	return tostring(mode or "Classic")
-end
-
-function Stars.GetPackName(mode, level)
-	local safeMode = tostring(mode or "Classic")
-	if safeMode == "Classic" then
-		local boardInfo = getBoardInfo(safeMode, level)
-		return tostring((boardInfo and (boardInfo.pack or boardInfo.tier)) or "Classic")
-	end
-
-	return safeMode
-end
-
-function Stars.GetEntryKey(mode, level, metadata)
-	local safeMode = tostring(mode or "Classic")
-	if safeMode == "Classic" then
-		local boardInfo = getBoardInfo(safeMode, level)
-		local packLevel = math.max(1, math.floor(tonumber(boardInfo and (boardInfo.packLevel or boardInfo.tierLevel) or level) or 1))
-		return string.format("%02d", packLevel)
-	end
-
-	if safeMode == "Daily" then
-		local dayStamp = math.max(0, math.floor(tonumber(metadata and metadata.dayStamp) or 0))
-		if dayStamp > 0 then
-			return tostring(dayStamp)
-		end
-	end
-
-	return string.format("%03d", clampClassicLevel(level))
-end
-
-function Stars.ResolveSlot(mode, level, metadata)
-	local safeMode = tostring(mode or "Classic")
-	return {
-		mode = Stars.GetModeBucket(safeMode),
-		pack = Stars.GetPackName(safeMode, level),
-		entry = Stars.GetEntryKey(safeMode, level, metadata),
-	}
-end
-
-function Stars.CalculateAward(_mode, _level, hintsUsed, cleared)
-	if cleared ~= true then
-		return 0
-	end
-
-	local safeHintsUsed = math.max(0, math.floor(tonumber(hintsUsed) or 0))
-	if safeHintsUsed == 0 then
-		return 3
-	elseif safeHintsUsed == 1 then
-		return 2
-	end
-
-	return 1
-end
-
-
--- Session playtime reward schedule.
-local TimedRewards = {}
-
-TimedRewards.Rewards = {
-	{ rewardType = "hints", amount = 1, playtimeSeconds = 600 },
-	{ rewardType = "pieces", amount = 10, playtimeSeconds = 1050 },
-	{ rewardType = "hints", amount = 1, playtimeSeconds = 1350 },
-	{ rewardType = "pieces", amount = 15, playtimeSeconds = 1650 },
-	{ rewardType = "hints", amount = 2, playtimeSeconds = 1950 },
-	{ rewardType = "pieces", amount = 20, playtimeSeconds = 2250 },
-	{ rewardType = "hints", amount = 2, playtimeSeconds = 2700 },
+local Experience = {
+	PerLetter = 20,
+	CompletionBonus = 120,
+	BaseLevelXp = 500,
+	LevelXpIncrease = 100,
+	LevelCount = 500,
+	ModeLevels = { Mini = 5, Jumbo = 10, Hardcore = 20 },
 }
 
-function TimedRewards.GetReward(index)
-	return TimedRewards.Rewards[index]
+-- Shared backend dictionary, indexed by player level (not puzzle number).
+-- Keep the formula fallback beyond the catalog to preserve existing progress.
+Experience.Levels = {}
+for level = 1, Experience.LevelCount do
+	local completed = level - 1
+	Experience.Levels[level] = table.freeze({
+		level = level,
+		totalXp = completed * Experience.BaseLevelXp + Experience.LevelXpIncrease * completed * (completed - 1) / 2,
+		xpToNextLevel = Experience.BaseLevelXp + completed * Experience.LevelXpIncrease,
+		rewardHints = level == 1 and 0 or (level % 2 == 0 and 2 or 1),
+		totalRewardHints = completed + math.floor(level / 2),
+	})
+end
+table.freeze(Experience.Levels)
+
+local function experienceInt(value)
+	local number = tonumber(value) or 0
+	if number ~= number or number == math.huge or number == -math.huge then return 0 end
+	return math.max(0, math.floor(number))
 end
 
-function TimedRewards.GetRewardValueName(index)
-	return "Reward" .. tostring(index)
+function Experience.RequiredForLevel(level)
+	local reached = math.max(1, experienceInt(level))
+	local definition = Experience.Levels[reached]
+	return definition and definition.xpToNextLevel or Experience.BaseLevelXp + (reached - 1) * Experience.LevelXpIncrease
 end
 
-function TimedRewards.GetRewardCount()
-	return #TimedRewards.Rewards
+function Experience.TotalForLevel(level)
+	local reached = math.max(1, experienceInt(level))
+	local definition = Experience.Levels[reached]
+	if definition then return definition.totalXp end
+	local completed = reached - 1
+	return completed * Experience.BaseLevelXp + Experience.LevelXpIncrease * completed * (completed - 1) / 2
 end
 
-function TimedRewards.GetRewardDescription(reward)
-	if not reward then
-		return ""
-	end
-
-	local label = reward.rewardType == "hints" and "Hint" or "Puzzle Piece"
-	if reward.amount ~= 1 then
-		label = label .. "s"
-	end
-
-	return string.format("%d %s", reward.amount, label)
+function Experience.Resolve(totalXp)
+	local total = experienceInt(totalXp)
+	local step = Experience.LevelXpIncrease
+	local coefficient = 2 * Experience.BaseLevelXp - step
+	local completed = math.floor((math.sqrt(coefficient * coefficient + 8 * step * total) - coefficient) / (2 * step))
+	local level = math.max(1, completed + 1)
+	-- Correct floating-point rounding at an exact cumulative threshold.
+	if Experience.TotalForLevel(level) > total then level = math.max(1, level - 1)
+	elseif Experience.TotalForLevel(level + 1) <= total then level += 1 end
+	return level, total - Experience.TotalForLevel(level), Experience.RequiredForLevel(level)
 end
 
+function Experience.HintsForLevel(level)
+	local reached = math.max(1, experienceInt(level))
+	local definition = Experience.Levels[reached]
+	if definition then return definition.rewardHints end
+	if reached == 1 then return 0 end
+	return reached % 2 == 0 and 2 or 1
+end
+
+function Experience.TotalHintRewards(level)
+	local reached = math.max(1, experienceInt(level))
+	local definition = Experience.Levels[reached]
+	if definition then return definition.totalRewardHints end
+	return reached - 1 + math.floor(reached / 2)
+end
 
 return {
-	Daily = Daily,
+	Experience = Experience,
 	Gift = Gift,
-	Stars = Stars,
-	TimedRewards = TimedRewards,
 }

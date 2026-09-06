@@ -1,240 +1,5 @@
 local TweenService = game:GetService("TweenService")
 
--- Button state and action wiring.
-local Buttons = {}
-
-function Buttons.new(config)
-	local ui = config.ui
-	local state = config.state
-	local colors = config.colors
-	local runtimeHelpers = config.runtimeHelpers
-	local uiEffects = config.uiEffects
-	local ensureScaleController = config.ensureScaleController
-	local bindButtonHoverSound = config.bindButtonHoverSound
-	local tween = config.tween
-	local findButtonLike = config.findButtonLike
-	local api = {}
-
-	local function setBaseColor(button, color)
-		button:SetAttribute("BaseColor", color)
-		uiEffects.SetBaseColor(button, color)
-	end
-
-	local function getBaseColor(button)
-		return button:GetAttribute("BaseColor") or colors.button
-	end
-
-	function api.setBaseColor(button, color)
-		if not button then
-			return
-		end
-
-		setBaseColor(button, color)
-	end
-
-	function api.setEnabled(button, enabled, color)
-		if not button then
-			return
-		end
-
-		if color then
-			setBaseColor(button, color)
-		end
-
-		button.Active = enabled
-		button.Selectable = enabled
-		button:SetAttribute("ButtonEnabled", enabled)
-
-		tween(button, {
-			BackgroundColor3 = enabled and getBaseColor(button) or colors.board,
-			BackgroundTransparency = enabled and 0 or 0.2,
-			TextColor3 = enabled and colors.text or colors.textMuted,
-		}, 0.14)
-
-		if button:FindFirstChild("ScaleController") and not enabled then
-			tween(button.ScaleController, { Scale = 1 }, 0.08)
-		end
-	end
-
-	function api.setInteractivityOnly(button, enabled)
-		if not button then
-			return
-		end
-
-		button.Active = enabled
-		button.Selectable = enabled
-		button:SetAttribute("ButtonEnabled", enabled)
-
-		tween(button, {
-			BackgroundTransparency = enabled and 0 or 0.2,
-		}, 0.14)
-
-		if button:FindFirstChild("ScaleController") and not enabled then
-			tween(button.ScaleController, { Scale = 1 }, 0.08)
-		end
-	end
-
-	function api.setClickableOnly(button, enabled)
-		if not button then
-			return
-		end
-
-		button.Active = enabled
-		button.Selectable = enabled
-		button:SetAttribute("ButtonEnabled", enabled)
-	end
-
-	function api.prepare(button, color, hoverBrightness)
-		if not button or not button:IsA("GuiButton") then
-			return
-		end
-
-		ensureScaleController(button)
-		setBaseColor(button, color or button.BackgroundColor3)
-		bindButtonHoverSound(button)
-		uiEffects.Init(button, {
-			baseColor = color or button.BackgroundColor3,
-			hoverScale = 1.04,
-			pressScale = 0.96,
-			hoverBrightness = hoverBrightness == nil and 0.08 or hoverBrightness,
-		})
-	end
-
-	function api.wireActions()
-		local function bindHintControl(button)
-			if not button or not button:IsA("GuiButton") or button:GetAttribute("WordSearchBound") then
-				return
-			end
-
-			button:SetAttribute("WordSearchBound", true)
-			button.Activated:Connect(function()
-				if runtimeHelpers.showHint then
-					runtimeHelpers.showHint()
-				end
-			end)
-		end
-
-		bindHintControl(ui.hintButton)
-		if ui.hintRoot and ui.hintRoot ~= ui.hintButton then
-			bindHintControl(findButtonLike(ui.hintRoot))
-			if not ui.hintRoot:IsA("GuiButton") and not ui.hintRoot:GetAttribute("WordSearchHintFrameBound") then
-				ui.hintRoot:SetAttribute("WordSearchHintFrameBound", true)
-				ui.hintRoot.InputBegan:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-						if runtimeHelpers.showHint then
-							runtimeHelpers.showHint()
-						end
-					end
-				end)
-			end
-		end
-
-		if ui.menuModeNextButton and not ui.menuModeNextButton:GetAttribute("WordSearchBound") then
-			ui.menuModeNextButton:SetAttribute("WordSearchBound", true)
-			ui.menuModeNextButton.Activated:Connect(function()
-				if config.isInteractionBlocked() then
-					return
-				end
-
-				state.menuModeIndex = (state.menuModeIndex % #config.modeOrder) + 1
-				config.refreshModeButtons()
-			end)
-		end
-
-		if ui.menuModePrevButton and not ui.menuModePrevButton:GetAttribute("WordSearchBound") then
-			ui.menuModePrevButton:SetAttribute("WordSearchBound", true)
-			ui.menuModePrevButton.Activated:Connect(function()
-				if config.isInteractionBlocked() then
-					return
-				end
-
-				state.menuModeIndex = ((state.menuModeIndex - 2) % #config.modeOrder) + 1
-				config.refreshModeButtons()
-			end)
-		end
-
-		if ui.menuPlayButton and not ui.menuPlayButton:GetAttribute("WordSearchBound") then
-			ui.menuPlayButton:SetAttribute("WordSearchBound", true)
-			ui.menuPlayButton.Activated:Connect(function()
-				config.handleMenuPlayPressed()
-			end)
-		end
-
-		if ui.menuDuelButton and not ui.menuDuelButton:GetAttribute("WordSearchBound") then
-			ui.menuDuelButton:SetAttribute("WordSearchBound", true)
-			ui.menuDuelButton.Activated:Connect(function()
-				if config.isInteractionBlocked() or not state.duelController then
-					return
-				end
-
-				config.playSound("OpenFrame")
-				state.duelController:showLobby()
-			end)
-		end
-
-		if ui.exitButton and not ui.exitButton:GetAttribute("WordSearchBound") then
-			ui.exitButton:SetAttribute("WordSearchBound", true)
-			ui.exitButton.Activated:Connect(function()
-				if config.isGameplayInteractionBlocked() then
-					return
-				end
-
-				config.playSound("Button2")
-				config.exitCurrentMode()
-			end)
-		end
-
-		if ui.nextButton and not ui.nextButton:GetAttribute("WordSearchBound") then
-			ui.nextButton:SetAttribute("WordSearchBound", true)
-			ui.nextButton.Activated:Connect(function()
-				if config.isGameplayInteractionBlocked() or not state.gameViewActive then
-					return
-				end
-
-				config.playSound("Button2")
-				if state.mode == "Classic" then
-					if state.puzzleIndex < config.getLevelsCount() then
-						config.transitionToPuzzle(state.puzzleIndex + 1)
-					end
-				else
-					config.transitionToPuzzle(
-						config.chooseModeLevelIndex(state.mode),
-						config.nextSeed(state.sessionScore + state.puzzlesCleared + 1)
-					)
-				end
-			end)
-		end
-
-		if ui.summaryButton and not ui.summaryButton:GetAttribute("WordSearchBound") then
-			ui.summaryButton:SetAttribute("WordSearchBound", true)
-			ui.summaryButton.Activated:Connect(function()
-				if ui.summaryButton:GetAttribute("ButtonEnabled") == false
-					or state.summaryGiftClaimPending == true
-					or state.summaryGiftSequenceActive == true then
-					return
-				end
-				config.playSound("Button2")
-				if state.summaryAction then
-					state.summaryAction()
-				end
-			end)
-		end
-
-		if ui.summaryGiftButton and not ui.summaryGiftButton:GetAttribute("WordSearchBound") then
-			ui.summaryGiftButton:SetAttribute("WordSearchBound", true)
-			ui.summaryGiftButton.Activated:Connect(function()
-				if config.claimSummaryGift then
-					config.playSound("Button2")
-					config.claimSummaryGift()
-				end
-			end)
-		end
-	end
-
-	return api
-end
-
-
 -- General GUI helpers.
 local Gui = {}
 
@@ -478,1575 +243,548 @@ function Gui.setText(node, value, fallbackNames)
 end
 
 
--- Menu/game view transitions.
-local Transitions = {}
-
-local function getTransitionTween(layout)
-	return layout.ViewTweenSlide or layout.ViewTweenIn or layout.ViewTweenOut
-end
-
-local function getStackedTravelOffset(layout, movingFrame, referenceFrame)
-	local movingHeight = movingFrame and movingFrame.AbsoluteSize.Y or 0
-	local referenceHeight = referenceFrame and referenceFrame.AbsoluteSize.Y or 0
-	local travelHeight = math.max(movingHeight, referenceHeight, 0)
-	local overlapPixels = math.max(0, math.floor(tonumber(layout.ViewStackedOverlapPixels) or 0))
-	if travelHeight <= 0 then
-		travelHeight = overlapPixels
-	end
-
-	return math.max(0, travelHeight - overlapPixels)
-end
-
-local function getStackedPosition(basePosition, layout, movingFrame, referenceFrame, direction)
-	local offset = getStackedTravelOffset(layout, movingFrame, referenceFrame) * direction
-	return UDim2.new(
-		basePosition.X.Scale,
-		basePosition.X.Offset,
-		basePosition.Y.Scale,
-		basePosition.Y.Offset + offset
-	)
-end
-
-function Transitions.showMenuView(context, animate, onComplete)
-	local ui = context.ui
-	local state = context.state
-	local layout = context.layout
-	local tween = context.tween
-	local refreshUiBindings = context.refreshUiBindings
-	local updateHud = context.updateHud
-
-	if not ui.menu then
-		state.gameViewActive = false
-		refreshUiBindings()
-		if onComplete then
-			onComplete()
-		end
-		return
-	end
-
-	local function finish()
-		state.viewTransitionBusy = false
-		state.gameViewActive = false
-		if ui.game then
-			ui.game.Visible = false
-			ui.game.Position = layout.ViewGameHiddenPosition
-			ui.game.Size = ui.gameOpenSize or ui.game.Size
-		end
-		ui.menu.Visible = true
-		ui.menu.Position = ui.menuOpenPosition or layout.ViewCenterPosition
-		ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-		refreshUiBindings()
-		updateHud()
-		if onComplete then
-			onComplete()
-		end
-	end
-
-	if not animate or not ui.game then
-		ui.menu.Visible = true
-		ui.menu.Position = ui.menuOpenPosition or layout.ViewCenterPosition
-		ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-		if ui.game then
-			ui.game.Visible = false
-			ui.game.Position = layout.ViewGameHiddenPosition
-			ui.game.Size = ui.gameOpenSize or ui.game.Size
-		end
-		finish()
-		return
-	end
-
-	local transitionTween = getTransitionTween(layout)
-	local menuOpenPosition = ui.menuOpenPosition or layout.ViewCenterPosition
-	local menuEntryPosition = getStackedPosition(menuOpenPosition, layout, ui.menu, ui.game, 1)
-	local gameExitPosition = getStackedPosition(menuOpenPosition, layout, ui.game, ui.menu, -1)
-
-	state.viewTransitionBusy = true
-	state.gameViewActive = false
-	ui.menu.Visible = true
-	ui.menu.Position = menuEntryPosition
-	ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-	ui.game.Visible = true
-	ui.game.Position = ui.gameOpenPosition or layout.ViewCenterPosition
-	ui.game.Size = ui.gameOpenSize or ui.game.Size
-	refreshUiBindings()
-
-	tween(ui.game, { Position = gameExitPosition }, transitionTween)
-	tween(ui.menu, { Position = menuOpenPosition }, transitionTween)
-	task.delay(transitionTween.Time + 0.02, function()
-		if not state.viewTransitionBusy then
-			return
-		end
-
-		if ui.game then
-			ui.game.Visible = false
-			ui.game.Position = layout.ViewGameHiddenPosition
-		end
-		ui.menu.Visible = true
-		ui.menu.Position = menuOpenPosition
-		ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-		refreshUiBindings()
-		finish()
-	end)
-end
-
-function Transitions.showGameView(context, animate, onComplete)
-	local ui = context.ui
-	local state = context.state
-	local layout = context.layout
-	local tween = context.tween
-	local refreshUiBindings = context.refreshUiBindings
-	local updateHud = context.updateHud
-
-	if not ui.game then
-		state.gameViewActive = true
-		refreshUiBindings()
-		if onComplete then
-			onComplete()
-		end
-		return
-	end
-
-	local function finish()
-		state.viewTransitionBusy = false
-		state.gameViewActive = true
-		if ui.menu then
-			ui.menu.Visible = false
-			ui.menu.Position = layout.ViewMenuHiddenPosition
-			ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-		end
-		ui.game.Visible = true
-		ui.game.Position = ui.gameOpenPosition or layout.ViewCenterPosition
-		ui.game.Size = ui.gameOpenSize or ui.game.Size
-		refreshUiBindings()
-		updateHud()
-		if onComplete then
-			onComplete()
-		end
-	end
-
-	if not animate or not ui.menu then
-		if ui.menu then
-			ui.menu.Visible = false
-			ui.menu.Position = layout.ViewMenuHiddenPosition
-			ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-		end
-		ui.game.Visible = true
-		ui.game.Position = ui.gameOpenPosition or layout.ViewCenterPosition
-		ui.game.Size = ui.gameOpenSize or ui.game.Size
-		finish()
-		return
-	end
-
-	local transitionTween = getTransitionTween(layout)
-	local menuOpenPosition = ui.menuOpenPosition or layout.ViewCenterPosition
-	local gameOpenPosition = ui.gameOpenPosition or layout.ViewCenterPosition
-	local menuExitPosition = getStackedPosition(gameOpenPosition, layout, ui.menu, ui.game, 1)
-	local gameEntryPosition = getStackedPosition(gameOpenPosition, layout, ui.game, ui.menu, -1)
-
-	state.viewTransitionBusy = true
-	ui.menu.Visible = true
-	ui.menu.Position = menuOpenPosition
-	ui.menu.Size = ui.menuOpenSize or ui.menu.Size
-	ui.game.Visible = true
-	ui.game.Position = gameEntryPosition
-	ui.game.Size = ui.gameOpenSize or ui.game.Size
-	refreshUiBindings()
-
-	tween(ui.menu, { Position = menuExitPosition }, transitionTween)
-	tween(ui.game, { Position = gameOpenPosition }, transitionTween)
-	task.delay(transitionTween.Time + 0.02, function()
-		if not state.viewTransitionBusy then
-			return
-		end
-
-		if ui.menu then
-			ui.menu.Visible = false
-			ui.menu.Position = layout.ViewMenuHiddenPosition
-		end
-		ui.game.Visible = true
-		ui.game.Position = gameOpenPosition
-		ui.game.Size = ui.gameOpenSize or ui.game.Size
-		refreshUiBindings()
-		finish()
-	end)
-end
-
-
--- Classic level selection components.
-local ClassicLevels = {}
-local LEVEL_CARD_VISUALS = {
-	locked = {
-		cardColor = Color3.fromRGB(46, 46, 46),
-		textColor = Color3.fromRGB(232, 232, 232),
-	},
-	playable = {
-		cardColor = Color3.fromRGB(78, 176, 92),
-		textColor = Color3.fromRGB(255, 255, 255),
-	},
-	completed = {
-		cardColor = Color3.fromRGB(38, 112, 52),
-		textColor = Color3.fromRGB(255, 255, 255),
-	},
-}
-
-local function applyBranchBackgroundColor(root, color)
-	if not root then
-		return
-	end
-
-	if root:IsA("GuiObject") then
-		root.BackgroundColor3 = color
-	end
-
-	for _, descendant in ipairs(root:GetDescendants()) do
-		if descendant:IsA("GuiObject") then
-			descendant.BackgroundColor3 = color
-		end
-	end
-end
-
-function ClassicLevels.getClassicLevelStarCount(state, Dependencies, levelNumber)
-	local resolvedLevel = math.clamp(math.floor(tonumber(levelNumber) or 1), 1, #Dependencies.Levels)
-	local slot = Dependencies.StarRules.ResolveSlot("Classic", resolvedLevel)
-	local modeBucket = type(state.starProgress[slot.mode]) == "table" and state.starProgress[slot.mode] or nil
-	local packBucket = modeBucket and type(modeBucket[slot.pack]) == "table" and modeBucket[slot.pack] or nil
-	return math.clamp(math.floor(tonumber(packBucket and packBucket[slot.entry]) or 0), 0, 3)
-end
-
-function ClassicLevels.getHighestReachedClassicLevel(state, Dependencies)
-	local savedClassicLevel = math.max(1, math.floor(tonumber(state.savedClassicLevel) or 1))
-	local highestStarredLevel = 0
-
-	for levelNumber = 1, #Dependencies.Levels do
-		if ClassicLevels.getClassicLevelStarCount(state, Dependencies, levelNumber) > 0 then
-			highestStarredLevel = levelNumber
-		end
-	end
-
-	return math.clamp(math.max(highestStarredLevel, savedClassicLevel - 1), 0, #Dependencies.Levels)
-end
-
-function ClassicLevels.isClassicLevelCompleted(state, Dependencies, levelNumber)
-	local resolvedLevel = math.clamp(math.floor(tonumber(levelNumber) or 1), 1, #Dependencies.Levels)
-	return resolvedLevel <= ClassicLevels.getHighestReachedClassicLevel(state, Dependencies)
-end
-
-function ClassicLevels.getCompletedClassicLevelsCount(state, Dependencies)
-	return ClassicLevels.getHighestReachedClassicLevel(state, Dependencies)
-end
-
-function ClassicLevels.getHighestCompletedClassicLevel(state, Dependencies)
-	return ClassicLevels.getHighestReachedClassicLevel(state, Dependencies)
-end
-
-function ClassicLevels.getClassicUnlockedLevel(state, Dependencies)
-	local savedClassicLevel = math.max(1, math.floor(tonumber(state.savedClassicLevel) or 1))
-	local highestCompletedLevel = ClassicLevels.getHighestCompletedClassicLevel(state, Dependencies)
-	local progressedLevel = highestCompletedLevel >= #Dependencies.Levels and #Dependencies.Levels or (highestCompletedLevel + 1)
-
-	return math.clamp(math.max(savedClassicLevel, progressedLevel), 1, #Dependencies.Levels)
-end
-
-function ClassicLevels.getClassicContinueLevel(state, Dependencies)
-	local resumeBoardState = type(state.resumeBoardState) == "table" and state.resumeBoardState or nil
-	local unlockedLevel = ClassicLevels.getClassicUnlockedLevel(state, Dependencies)
-	if resumeBoardState and resumeBoardState.mode == "Classic" then
-		local resumeLevel = math.clamp(math.floor(tonumber(resumeBoardState.level) or unlockedLevel), 1, #Dependencies.Levels)
-		if resumeLevel == unlockedLevel then
-			return resumeLevel
-		end
-	end
-
-	return unlockedLevel
-end
-
-function ClassicLevels.applyClassicLevelStarVisual(starNode, isEarned)
-	if not starNode then
-		return
-	end
-
-	if starNode:IsA("ImageLabel") or starNode:IsA("ImageButton") then
-		starNode.ImageColor3 = isEarned and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(75, 75, 75)
-		starNode.ImageTransparency = isEarned and 0 or 0.5
-	end
-
-	if starNode:IsA("GuiObject") then
-		starNode.Visible = true
-	end
-end
-
-function ClassicLevels.getClassicLevelTemplate(ui, ReplicatedStorage)
-	local template = ui.levelTemplate
-	if template and template.Parent then
-		return template
-	end
-
-	template = ReplicatedStorage:FindFirstChild("Level", true)
-	if not (template and template:IsA("GuiObject")) then
-		template = ReplicatedStorage:FindFirstChild("LevelTemplate", true)
-	end
-
-	if template and template:IsA("GuiObject") then
-		ui.levelTemplate = template
-		return template
-	end
-
-	return nil
-end
-
-function ClassicLevels.resolveClassicLevelLabel(root, findDescendantByNames)
-	if not root then
-		return nil
-	end
-
-	local named = findDescendantByNames(root, { "Number", "LevelNumber", "Label", "TextLabel", "Level" }, nil)
-	if named and (named:IsA("TextLabel") or named:IsA("TextButton")) then
-		return named
-	end
-
-	if root:IsA("TextLabel") or root:IsA("TextButton") then
-		return root
-	end
-
-	for _, descendant in ipairs(root:GetDescendants()) do
-		if (descendant:IsA("TextLabel") or descendant:IsA("TextButton"))
-			and not descendant:FindFirstAncestor("Completed")
-			and not descendant:FindFirstAncestor("Locked") then
-			return descendant
-		end
-	end
-
-	return nil
-end
-
-function ClassicLevels.getClassicLevelVisualState(isUnlocked, starCount, isCompleted)
-	if isCompleted == true or starCount > 0 then
-		return "completed", LEVEL_CARD_VISUALS.completed
-	end
-
-	if isUnlocked then
-		return "playable", LEVEL_CARD_VISUALS.playable
-	end
-
-	return "locked", LEVEL_CARD_VISUALS.locked
-end
-
-function ClassicLevels.applyClassicLevelVisualState(entry, isUnlocked, starCount, isCompleted, findDescendantByNames)
-	if type(entry) ~= "table" then
-		return
-	end
-
-	local visualKey, visualState = ClassicLevels.getClassicLevelVisualState(isUnlocked, starCount, isCompleted)
-	local completedNode = entry.completedNode
-	local completedFrame = completedNode and (
-		completedNode:FindFirstChild("Frame")
-			or findDescendantByNames(completedNode, { "Frame" }, nil)
-	) or nil
-	local lockedNode = entry.lockedNode
-
-	applyBranchBackgroundColor(entry.root, visualState.cardColor)
-	applyBranchBackgroundColor(completedNode, visualState.cardColor)
-	applyBranchBackgroundColor(completedFrame, visualState.cardColor)
-	applyBranchBackgroundColor(lockedNode, LEVEL_CARD_VISUALS.locked.cardColor)
-
-	if entry.label and (entry.label:IsA("TextLabel") or entry.label:IsA("TextButton")) then
-		entry.label.TextColor3 = visualState.textColor
-	end
-
-	if completedNode and completedNode:IsA("GuiObject") then
-		completedNode.Visible = visualKey == "completed"
-	end
-
-	if lockedNode and lockedNode:IsA("GuiObject") then
-		lockedNode.Visible = visualKey == "locked"
-		for _, descendant in ipairs(lockedNode:GetDescendants()) do
-			if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
-				descendant.TextColor3 = LEVEL_CARD_VISUALS.locked.textColor
-			end
-		end
-	end
-end
-
-function ClassicLevels.createClassicLevelEntry(env, levelNumber)
-	local ui = env.ui
-	local container = ui.levelsContainer
-	if not (container and container.Parent) then
-		return nil
-	end
-
-	local template = ClassicLevels.getClassicLevelTemplate(ui, env.ReplicatedStorage)
-	local root
-	if template then
-		root = template:Clone()
-		root.Visible = true
-	else
-		root = env.create("Frame", {
-			Name = "LevelCard",
-			BackgroundColor3 = Color3.fromRGB(78, 176, 92),
-			BackgroundTransparency = 0,
-			BorderSizePixel = 0,
-			Size = UDim2.fromOffset(100, 100),
-			Visible = true,
-			Parent = container,
-		})
-		env.create("UICorner", {
-			Name = "Corner",
-			CornerRadius = UDim.new(0, 10),
-			Parent = root,
-		})
-	end
-
-	root.Name = "Level_" .. tostring(levelNumber)
-	root.LayoutOrder = levelNumber
-	root:SetAttribute("WordSearchLevelEntry", true)
-	root.Parent = container
-
-	if root:IsA("GuiButton") then
-		root.Text = ""
-	end
-
-	local aspect = root:FindFirstChildWhichIsA("UIAspectRatioConstraint")
-	if not aspect then
-		aspect = env.create("UIAspectRatioConstraint", {
-			Name = "Aspect",
-			AspectRatio = 1,
-			Parent = root,
-		})
-	end
-
-	local label = ClassicLevels.resolveClassicLevelLabel(root, env.findDescendantByNames)
-	if not label then
-		label = env.create("TextLabel", {
-			Name = "TextLabel",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.38),
-			Size = UDim2.fromScale(0.68, 0.38),
-			Text = "",
-			TextColor3 = Color3.fromRGB(255, 255, 255),
-			TextScaled = true,
-			Font = Enum.Font.GothamBold,
-			ZIndex = (root.ZIndex or 1) + 1,
-			Parent = root,
-		})
-	end
-
-	local pressable = env.findButtonLike(root)
-	if not pressable then
-		pressable = env.create("TextButton", {
-			Name = "Pressable",
-			AutoButtonColor = false,
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0, 0),
-			Size = UDim2.fromScale(1, 1),
-			Text = "",
-			ZIndex = (root.ZIndex or 1) + 2,
-			Parent = root,
-		})
-	end
-
-	local completedNode = root:FindFirstChild("Completed") or env.findDescendantByNames(root, { "Completed" }, nil)
-	local lockedNode = root:FindFirstChild("Locked") or env.findDescendantByNames(root, { "Locked" }, nil)
-	local starRoot = completedNode or root
-	local starOne = env.findDescendantByNames(starRoot, { "StarOne" }, nil)
-	local starTwo = env.findDescendantByNames(starRoot, { "StarTwo" }, nil)
-	local starThree = env.findDescendantByNames(starRoot, { "StarThree" }, nil)
-
-	if pressable and pressable:IsA("GuiButton") then
-		env.ButtonUi.prepare(pressable)
-		if not pressable:GetAttribute("WordSearchLevelBound") then
-			pressable:SetAttribute("WordSearchLevelBound", true)
-			pressable.Activated:Connect(function()
-				env.startClassicLevelFromSelector(tonumber(root:GetAttribute("ClassicLevel")) or levelNumber)
-			end)
-		end
-	end
-
-	local entry = {
-		root = root,
-		label = label,
-		pressable = pressable,
-		completedNode = completedNode,
-		lockedNode = lockedNode,
-		starOne = starOne,
-		starTwo = starTwo,
-		starThree = starThree,
-	}
-	ui.levelEntries[levelNumber] = entry
-	return entry
-end
-
-
--- Shared client-only visual effects are replicated for authored HUD scripts too.
-local UIEffects = require(
-	game:GetService("ReplicatedStorage"):WaitForChild("shared"):WaitForChild("ui"):WaitForChild("UIEffects")
-)
-
-local Components = {
-	Buttons = Buttons,
-	Gui = Gui,
-	Transitions = Transitions,
-	ClassicLevels = ClassicLevels,
-	Effects = UIEffects,
-}
-
-
-local Interface = {}
-
-local function isGameplayHudScreenGui(gui)
-	return gui
-		and gui:IsA("ScreenGui")
-		and (
-			gui.Name == "HUD"
-			or gui.Name == "Desktop"
-			or gui.Name == "Mobile"
-			or (gui:FindFirstChild("Game") and gui:FindFirstChild("Frames"))
-		)
-end
-
-function Interface.findHUD(playerGui, timeoutSeconds)
-	local timeoutAt = tick() + math.max(0.1, tonumber(timeoutSeconds) or 10)
-
-	repeat
-		local directHUD = playerGui:FindFirstChild("HUD")
-		local desktopHUD = playerGui:FindFirstChild("Desktop")
-		local mobileHUD = playerGui:FindFirstChild("Mobile")
-		if isGameplayHudScreenGui(directHUD) then
-			return directHUD
-		end
-		if isGameplayHudScreenGui(desktopHUD) then
-			return desktopHUD
-		end
-		if isGameplayHudScreenGui(mobileHUD) then
-			return mobileHUD
-		end
-
-		for _, child in ipairs(playerGui:GetChildren()) do
-			if isGameplayHudScreenGui(child) then
-				return child
-			end
-		end
-
-		task.wait(0.1)
-	until tick() >= timeoutAt
-
-	return nil
-end
-
-function Interface.isMobileInterface(userInputService)
-	return userInputService.TouchEnabled and not userInputService.KeyboardEnabled
-end
-
-function Interface.removeExistingHUDs(playerGui)
-	for _, child in ipairs(playerGui:GetChildren()) do
-		if isGameplayHudScreenGui(child) then
-			child:Destroy()
-		end
-	end
-end
-
-function Interface.ensurePlatformHUD(playerGui, interfacesFolder, userInputService)
-	if not playerGui then
-		return nil
-	end
-
-	if not interfacesFolder then
-		return Interface.findHUD(playerGui, 1)
-	end
-
-	local templateName = Interface.isMobileInterface(userInputService) and "Mobile" or "Desktop"
-	local template = interfacesFolder:FindFirstChild(templateName)
-	if not (template and template:IsA("ScreenGui")) then
-		return Interface.findHUD(playerGui, 1)
-	end
-
-	Interface.removeExistingHUDs(playerGui)
-
-	local clonedHUD = template:Clone()
-	clonedHUD.Name = "HUD"
-	clonedHUD.ResetOnSpawn = false
-	clonedHUD.Enabled = false
-	clonedHUD.Parent = playerGui
-	return clonedHUD
-end
-
-
--- Authored HUD discovery and binding.
+local Components = { Gui = Gui }
+
+-- Exact authored Home/Game binding. The surrounding HUD and modal assets stay authored.
+local Experience = require(game:GetService("ReplicatedStorage"):WaitForChild("shared"):WaitForChild("config"):WaitForChild("ProgressionConfig")).Experience
+local Effects = require(game:GetService("ReplicatedStorage"):WaitForChild("shared"):WaitForChild("ui"):WaitForChild("UIEffects"))
 local InterfaceController = {}
+local TweenService = game:GetService("TweenService")
 
-function InterfaceController.create(env)
-local player = env.player
-local UserInputService = env.UserInputService
-
-local RuntimeHelpers = env.RuntimeHelpers
-local Dependencies = env.Dependencies
-local state = env.state
-local ui = env.ui
-
-local create = env.create
-local waitForDescendantByNames = env.waitForDescendantByNames
-local findDescendantByNames = env.findDescendantByNames
-local findFirstPath = env.findFirstPath
-local findTextObject = env.findTextObject
-local ensureScaleController = env.ensureScaleController
-local findButtonLike = env.findButtonLike
-local bindButtonHoverSound = env.bindButtonHoverSound
-local applyTextFont = env.applyTextFont
-local getWordRowTemplate = env.getWordRowTemplate
-local syncBoardContentLayout = env.syncBoardContentLayout
-local createDragLineObjects = env.createDragLineObjects
-local refreshPersistentLines = env.refreshPersistentLines
-local ButtonUi = env.ButtonUi
-local COLORS = env.COLORS
-local DEFAULT_WORD_ROW_COLOR = env.DEFAULT_WORD_ROW_COLOR
-local DEFAULT_WORD_ROW_TRANSPARENCY = env.DEFAULT_WORD_ROW_TRANSPARENCY
-local BOARD_STROKE_HIDDEN_TRANSPARENCY = env.BOARD_STROKE_HIDDEN_TRANSPARENCY
-local LAYOUT = env.LAYOUT
-local DUEL_MODE_MIN_FILL_SCALE = env.DUEL_MODE_MIN_FILL_SCALE
-local MODAL_PARENT_OPEN_TRANSPARENCY = env.MODAL_PARENT_OPEN_TRANSPARENCY
-local updateWordsLabel = env.updateWordsLabel
-
-local function resolveOverlayOpenTransparency(value)
-	local resolved = tonumber(value)
-	if resolved == nil or resolved >= 0.95 then
-		return MODAL_PARENT_OPEN_TRANSPARENCY
-	end
-
-	return math.clamp(resolved, 0, 0.95)
+local function path(root, names)
+	for _, name in ipairs(names) do root = root and root:FindFirstChild(name) end
+	return root
 end
 
-local function resolveCardOpenTransparency(value, fallback)
-	local resolved = tonumber(value)
-	if resolved == nil or resolved >= 0.95 then
-		return fallback
-	end
-
-	return math.clamp(resolved, 0, 0.95)
+local function required(root, names)
+	local value = path(root, names)
+	assert(value, "Missing authored HUD path: " .. table.concat(names, "."))
+	return value
 end
 
-function RuntimeHelpers.bindExistingUI()
-	local runtimePlayerGui = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui")
-	local existingGui = Dependencies.InterfaceBootstrap.findHUD(runtimePlayerGui, 15)
-		or runtimePlayerGui:WaitForChild("HUD")
-	local gameFrame = existingGui:FindFirstChild("Game") or waitForDescendantByNames(existingGui, { "Game" }, nil)
-	local menuFrame = existingGui:FindFirstChild("Menu") or findDescendantByNames(existingGui, { "Menu" }, nil)
-	local framesRoot = existingGui:FindFirstChild("Frames") or findDescendantByNames(existingGui, { "Frames" }, nil)
-	local contentFrame = findDescendantByNames(gameFrame or existingGui, { "ContentFrame" }, nil)
-	local boardColumn = contentFrame and findDescendantByNames(contentFrame, { "BoardColumn" }, nil) or nil
-	local boardHolder = boardColumn and findDescendantByNames(boardColumn, { "BoardHolder" }, nil) or nil
-	if not boardHolder then
-		boardHolder = boardColumn and findDescendantByNames(boardColumn, { "BoardFrame" }, nil) or nil
-	end
-	if not boardHolder then
-		boardHolder = waitForDescendantByNames(gameFrame or existingGui, { "Board", "BoardHolder" }, nil)
-	end
-	local boardFrame = boardHolder
-	local gameTopBar = gameFrame and (gameFrame:FindFirstChild("TopBar") or findDescendantByNames(gameFrame, { "TopBar" }, nil)) or nil
-	local gameTopBarContainer = gameTopBar and (gameTopBar:FindFirstChild("Container") or findDescendantByNames(gameTopBar, { "Container" }, nil)) or gameTopBar
-	local menuActionRow = menuFrame and findDescendantByNames(menuFrame, { "ActionRow" }, nil) or nil
-	local menuPlayRoot = menuActionRow and findDescendantByNames(menuActionRow, { "Play" }, nil)
-		or (menuFrame and findDescendantByNames(menuFrame, { "Play" }, nil))
-	local menuDuelRoot = menuActionRow and findDescendantByNames(menuActionRow, { "Duel", "Duels" }, nil)
-		or (menuFrame and findDescendantByNames(menuFrame, { "Duel", "Duels" }, nil))
-	local menuModeCarousel = menuFrame and findDescendantByNames(menuFrame, { "ModeCarousel" }, nil) or nil
-	local hintRoot = gameTopBarContainer and (gameTopBarContainer:FindFirstChild("Hint") or findDescendantByNames(gameTopBarContainer, { "Hint" }, nil)) or nil
-	if not hintRoot then
-		hintRoot = gameFrame and (gameFrame:FindFirstChild("Hint") or nil) or nil
-	end
-	if not hintRoot then
-		hintRoot = findDescendantByNames(gameFrame or existingGui, { "Hint" }, nil)
-	end
-	local hintButton = findButtonLike(
-		(hintRoot and (hintRoot:FindFirstChild("HintButton", true) or hintRoot)) or findDescendantByNames(gameTopBarContainer or gameFrame or existingGui, { "HintButton" }, nil)
-	)
-	if not hintButton then
-		hintButton = findButtonLike(findDescendantByNames(gameTopBarContainer or gameFrame or existingGui, { "HintButton", "Hint" }, nil))
-	end
-	local nextButton = findButtonLike(findDescendantByNames(gameFrame or existingGui, { "NextButton" }, nil))
-	for _, retiredControlName in ipairs({ "TimedMode", "MoreTime", "Freeze", "RuntimeCombo", "TimedCombo", "Warning" }) do
-		local retiredControl = findDescendantByNames(gameFrame or existingGui, { retiredControlName }, nil)
-		if retiredControl and retiredControl:IsA("GuiObject") then
-			retiredControl.Visible = false
-			retiredControl.Active = false
-		end
-	end
-	local duelModeRoot = RuntimeHelpers.ensureDuelModeUi(gameFrame)
-	local modeBar = findDescendantByNames(gameFrame or existingGui, { "ModeBar" }, nil)
-	local infoBar = findDescendantByNames(gameFrame or existingGui, { "InfoBar" }, nil)
-	local previousButton = gameFrame and findDescendantByNames(gameFrame, { "PreviousButton", "Previous" }, nil) or nil
-	local streakRoot = findDescendantByNames(gameFrame or existingGui, { "Streak" }, nil)
-	local alertsRoot = existingGui:FindFirstChild("Alerts") or findDescendantByNames(existingGui, { "Alerts" }, nil)
-	local alertsList = alertsRoot and (findDescendantByNames(alertsRoot, { "List" }, nil) or alertsRoot) or nil
-	local countdownFrame = framesRoot and (framesRoot:FindFirstChild("Countdown") or framesRoot:FindFirstChild("DuelCountdown") or findDescendantByNames(framesRoot, { "Countdown", "DuelCountdown" }, nil)) or nil
-	local countdownLabel = countdownFrame and (findDescendantByNames(countdownFrame, { "Label", "Countdown" }, nil) or countdownFrame:FindFirstChildWhichIsA("TextLabel", true)) or nil
-	local runtimeHudRoot = nil
+local function text(parent, name, value, position, size)
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.Text = value
+	label.TextColor3 = Color3.fromRGB(17, 44, 67)
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.Position = position
+	label.Size = size
+	label.ZIndex = 52
+	label.Parent = parent
+	return label
+end
 
-	ui.screenGui = existingGui
-	ui.menu = menuFrame
-	ui.game = gameFrame
-	ui.runtimeHudRoot = runtimeHudRoot
-	ui.framesRoot = framesRoot
-	ui.foundLineEntries = {}
-	ui.hintLineEntries = {}
-	ui.modeButtons = {}
-	ui.wordRows = {}
-	ui.wordRowsToken = 0
-	ui.wordRowTemplate = getWordRowTemplate()
-	if ui.wordRowTemplate and ui.wordRowTemplate:IsA("GuiObject") then
-		ui.wordRowTemplate.BackgroundColor3 = DEFAULT_WORD_ROW_COLOR
-		ui.wordRowTemplate.BackgroundTransparency = DEFAULT_WORD_ROW_TRANSPARENCY
-	end
+local function button(parent, name, value, position, size)
+	local control = Instance.new("TextButton")
+	control.Name = name
+	control.Text = value
+	control.TextScaled = true
+	control.Font = Enum.Font.GothamBold
+	control.TextColor3 = Color3.fromRGB(17, 44, 67)
+	control.BackgroundColor3 = Color3.fromRGB(224, 239, 255)
+	control.Position = position
+	control.Size = size
+	control.ZIndex = 53
+	control.Parent = parent
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = control
+	return control
+end
 
-	ui.topBarShell = gameTopBar
-	ui.gameTopBar = gameTopBar
-	ui.gameTopBarContainer = gameTopBarContainer
-	ui.streakRoot = streakRoot
-	ui.streakLabel = streakRoot and findTextObject(streakRoot, { "Count", "Label", "TextLabel", "Amount", "Value" }) or nil
-	if not ui.streakLabel and streakRoot and streakRoot:IsA("GuiObject") then
-		ui.streakLabel = create("TextLabel", {
-			Name = "Count",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.54),
-			Size = UDim2.fromScale(0.68, 0.34),
-			Text = "0",
-			TextColor3 = Color3.fromRGB(255, 255, 255),
-			TextScaled = true,
-			Font = Enum.Font.GothamBold,
-			ZIndex = (streakRoot.ZIndex or 1) + 1,
-			Parent = streakRoot,
-		})
+function InterfaceController.Bind(hud)
+	local tutorialFrame = hud:FindFirstChild("Tutorial")
+	if tutorialFrame then tutorialFrame.Visible = false end
+	local ui = {
+		screenGui = hud,
+		home = required(hud, { "Home" }),
+		game = required(hud, { "Game" }),
+		frames = hud:FindFirstChild("Frames"),
+	}
+	ui.modes = required(ui.home, { "Gamemodes" })
+	ui.standard = required(ui.modes, { "Standard" })
+	ui.play = required(ui.standard, { "Play" })
+	ui.waiting = required(ui.standard, { "Waiting" })
+	ui.buttonBar = required(ui.home, { "ButtonBar" })
+	ui.boardPanel = required(ui.game, { "BoardPanel" })
+	ui.wordPanel = required(ui.game, { "WordPanel" })
+	ui.words = required(ui.wordPanel, { "Words" })
+	ui.wordList = required(ui.wordPanel, { "Container", "ScrollingFrame" })
+	ui.title = required(ui.game, { "Title" })
+	ui.subtitle = required(ui.game, { "Subtitle" })
+	ui.hint = required(ui.game, { "Hint" })
+	ui.hintBadge = path(ui.hint, { "Owned" })
+	ui.hintCount = path(ui.hintBadge, { "TextLabel" })
+	if ui.hintBadge then ui.hintBadge.Visible = false end
+	ui.exit = required(ui.game, { "Exit" })
+	ui.duel = ui.game:FindFirstChild("OneVsOneMode")
+	ui.timed = ui.game:FindFirstChild("TimedMode")
+	ui.timedTimeLeft = path(ui.timed, { "TimeLeft" })
+	ui.timedFill = path(ui.timed, { "FillBar", "Fill" })
+	InterfaceController.UpdateTimedTimer(ui, nil, nil, true)
+	ui.home.Visible, ui.game.Visible = true, false
+	if ui.duel then ui.duel.Visible = false end
+	if ui.timed then ui.timed.Visible = false end
+	ui.wordList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	ui.wordList.CanvasSize = UDim2.new()
+	ui.wordList.ScrollingDirection = Enum.ScrollingDirection.Y
+	local wordLayout = ui.wordList:FindFirstChildOfClass("UIListLayout")
+	if wordLayout then wordLayout.SortOrder = Enum.SortOrder.LayoutOrder end
+	-- Preserve the authored UIListLayout, corners, strokes and sizes.
+	local icon = ui.home:FindFirstChild("GameIcon")
+	if icon then
+		local base = icon.Rotation
+		icon.Rotation = base - 4
+		TweenService:Create(icon, TweenInfo.new(3.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Rotation = base + 4 }):Play()
 	end
-	ui.streakScale = streakRoot and ensureScaleController(streakRoot) or nil
-	if ui.streakRoot and ui.streakRoot:IsA("GuiObject") then
-		ui.streakRoot.Visible = false
+	local waitingStroke = path(ui.waiting, { "Frame", "UIStroke" })
+	if waitingStroke then
+		waitingStroke.Thickness = 3
+		TweenService:Create(waitingStroke, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Thickness = 1 }):Play()
 	end
-	ui.gameTitleLabel = gameTopBarContainer and (
-		findDescendantByNames(gameTopBarContainer, { "Title", "TitleLabel", "TextLabel" }, "TextLabel")
-			or findDescendantByNames(gameTopBarContainer, { "Title", "TitleLabel" }, "TextButton")
-	) or nil
-	ui.exitButton = findButtonLike(findDescendantByNames(gameTopBarContainer or gameTopBar, { "exit", "Exit" }, nil))
-	if modeBar and modeBar:IsA("GuiObject") then
-		modeBar.Visible = false
+	if ui.duel then
+		for _, name in ipairs({ "YouWinRate", "EnemyWinRate" }) do
+			local node = ui.duel:FindFirstChild(name)
+			if node then node.Visible = false end
+		end
 	end
-	if infoBar and infoBar:IsA("GuiObject") then
-		infoBar.Visible = false
-	end
-	if previousButton and previousButton:IsA("GuiObject") then
-		previousButton.Visible = false
-	end
-	ui.modeBar = nil
-	ui.infoBar = nil
-	ui.contentFrame = contentFrame
-	ui.wordPanel = findDescendantByNames(gameFrame or existingGui, { "WordPanel" }, nil)
-	ui.wordPanelTitleLabel = findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "WordPanelTitleLabel" }, "TextLabel")
-		or findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "WordPanelTitleLabel" }, "TextButton")
-	ui.wordPanelCountLabel = findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "WordPanelCountLabel" }, "TextLabel")
-		or findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "WordPanelCountLabel" }, "TextButton")
-	ui.wordListScroll = findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "WordListScroll", "WordList", "WordsList" }, nil)
-	ui.boardColumn = boardColumn
-	ui.progressLabel = findTextObject(ui.contentFrame or gameFrame or existingGui, { "ProgressLabel" })
-	ui.subtitleLabel = findTextObject(ui.contentFrame or gameFrame or existingGui, { "SubtitleLabel" })
-	ui.progressCounterLabel = findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "ProgressCounterLabel" }, "TextLabel")
-		or findDescendantByNames(ui.contentFrame or gameFrame or existingGui, { "ProgressCounterLabel" }, "TextButton")
-	local statusCard = findDescendantByNames(gameFrame or existingGui, { "StatusCard" }, nil)
-	local statusLabel = findDescendantByNames(gameFrame or existingGui, { "StatusLabel" }, nil)
-	if statusCard and statusCard:IsA("GuiObject") then
-		statusCard.Visible = false
-	end
-	if statusLabel and statusLabel:IsA("GuiObject") then
-		statusLabel.Visible = false
-	end
-	ui.statusCard = nil
-	ui.statusAccent = nil
-	ui.statusLabel = nil
-	ui.statusScale = nil
+	ui.queue = required(hud, { "Queue" })
+	ui.queueContainer = required(ui.queue, { "Container" })
+	ui.queueSubtitle = required(ui.queue, { "Subtitle" })
+	ui.queueLeave = required(ui.queue, { "Exit" })
+	ui.queueSolo = ui.queue:FindFirstChild("Solo")
+	ui.queueTemplate = game:GetService("ReplicatedStorage"):WaitForChild("Assets"):WaitForChild("PlayerTemplate")
+	ui.queueEntries = {}
+	ui.queuePortraitRandom = Random.new()
+	ui.queue.Visible = false
+	for _, screen in ipairs({ ui.home, ui.game, ui.queue }) do Effects.AnimatePattern(screen:FindFirstChild("Pattern")) end
+	ui.queueSubtitle.Text = "Classic Mode (15s)"
+	local queueLayout = ui.queueContainer:FindFirstChildOfClass("UIGridLayout")
+	if queueLayout then queueLayout.SortOrder = Enum.SortOrder.LayoutOrder end
+	local pause = Instance.new("Frame")
+	pause.Name = "RoundPause"
+	pause.Size = UDim2.fromScale(1, 1)
+	pause.BackgroundColor3 = Color3.new(1, 1, 1)
+	pause.BackgroundTransparency = 0.08
+	pause.ZIndex = 50
+	pause.Active = true
+	pause.Visible = false
+	pause.Parent = hud
+	ui.pause = pause
+	text(pause, "Title", "PAUSED", UDim2.fromScale(0.3, 0.3), UDim2.fromScale(0.4, 0.1))
+	ui.resume = button(pause, "Resume", "Resume", UDim2.fromScale(0.35, 0.46), UDim2.fromScale(0.3, 0.09))
+	ui.leaveRound = button(pause, "Leave", "Leave round", UDim2.fromScale(0.35, 0.58), UDim2.fromScale(0.3, 0.09))
+	for _, root in ipairs({ ui.home, ui.queue, pause }) do Effects.ApplyToAll(root) end
+	if ui.frames then Effects.ApplyToAll(ui.frames) end
+	Effects.Init(ui.hint)
+	Effects.Init(ui.exit)
+	return ui
+end
 
-	ui.boardHolder = boardHolder
-	ui.boardFrame = boardHolder
-	ui.boardScaleController = ui.boardHolder and ensureScaleController(ui.boardHolder) or nil
-	ui.boardHolderStroke = ui.boardHolder and ui.boardHolder:FindFirstChildWhichIsA("UIStroke", true) or nil
-	if ui.boardHolder then
-		ui.boardHolder.ClipsDescendants = true
-		if ui.boardHolder:IsA("GuiObject") then
-			ui.boardHolder.BackgroundTransparency = 1
-		end
-	end
-	if ui.boardHolderStroke then
-		ui.boardHolderStroke.Transparency = BOARD_STROKE_HIDDEN_TRANSPARENCY
-	end
-	ui.boardContent = ui.boardHolder and (ui.boardHolder:FindFirstChild("PuzzleContent") or create("Frame", {
-		Name = "PuzzleContent",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ClipsDescendants = true,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(1, 1),
-		Parent = ui.boardHolder,
-	})) or nil
-	if ui.boardContent then
-		ui.boardContent.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.boardContent.Position = UDim2.fromScale(0.5, 0.5)
-		ui.boardContent.BackgroundTransparency = 1
-		ui.boardContent.BorderSizePixel = 0
-		ui.boardContent.ClipsDescendants = true
-	end
-	ui.praiseBannerRoot = ui.boardHolder and (
-		ui.boardHolder:FindFirstChild("PraiseBanner")
-			or findDescendantByNames(ui.boardHolder, { "PraiseBanner" }, nil)
-	) or nil
-	if not ui.praiseBannerRoot and ui.boardHolder then
-		ui.praiseBannerRoot = create("Frame", {
-			Name = "PraiseBanner",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.18),
-			Size = UDim2.fromScale(0.62, 0.2067),
-			Visible = false,
-			ZIndex = 24,
-			Parent = ui.boardHolder,
-		})
-		create("UIAspectRatioConstraint", {
-			Name = "AspectRatio",
-			AspectRatio = 3,
-			Parent = ui.praiseBannerRoot,
-		})
-		ui.praiseBannerImage = create("ImageLabel", {
-			Name = "Image",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Image = RuntimeHelpers.praiseBannerConfig.imageId,
-			ImageTransparency = 1,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromScale(1, 1),
-			ZIndex = 24,
-			Parent = ui.praiseBannerRoot,
-		})
-		ui.praiseBannerLabel = create("TextLabel", {
-			Name = "Label",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamBlack,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromScale(0.8, 0.46),
-			Text = "",
-			TextColor3 = Color3.fromRGB(255, 255, 255),
-			TextScaled = true,
-			TextTransparency = 1,
-			ZIndex = 25,
-			Parent = ui.praiseBannerRoot,
-		})
-		applyTextFont(ui.praiseBannerLabel, Enum.Font.GothamBlack)
-	end
-	ui.praiseBannerImage = ui.praiseBannerImage
-		or (ui.praiseBannerRoot and (ui.praiseBannerRoot:FindFirstChild("Image") or ui.praiseBannerRoot:FindFirstChildWhichIsA("ImageLabel", true))) or nil
-	ui.praiseBannerLabel = ui.praiseBannerLabel
-		or (ui.praiseBannerRoot and findTextObject(ui.praiseBannerRoot, { "Label", "TextLabel" })) or nil
-	ui.praiseBannerScale = ui.praiseBannerRoot and ensureScaleController(ui.praiseBannerRoot) or nil
-	ui.praiseBannerOpenPosition = UDim2.fromScale(0.5, 0.18)
-	ui.praiseBannerStartPosition = UDim2.fromScale(0.5, 0.145)
-	ui.praiseBannerExitPosition = UDim2.fromScale(0.5, 0.13)
-	if ui.praiseBannerRoot then
-		ui.praiseBannerRoot.Position = ui.praiseBannerStartPosition
-		ui.praiseBannerRoot.Visible = false
-	end
-	ui.boardVisualGroup = ui.boardContent and ui.boardContent:FindFirstChild("BoardVisualGroup") or nil
-	if not ui.boardVisualGroup and ui.boardContent then
-		local createCanvasGroupSuccess, boardVisualGroup = pcall(function()
-			return create("CanvasGroup", {
-				Name = "BoardVisualGroup",
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundTransparency = 1,
-				BorderSizePixel = 0,
-				GroupTransparency = 0,
-				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.fromScale(1, 1),
-				Parent = ui.boardContent,
-			})
-		end)
-		if createCanvasGroupSuccess then
-			ui.boardVisualGroup = boardVisualGroup
-		end
-	end
-	if ui.boardVisualGroup then
-		ui.boardVisualGroup.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.boardVisualGroup.Position = UDim2.fromScale(0.5, 0.5)
-		ui.boardVisualGroup.BackgroundTransparency = 1
-		ui.boardVisualGroup.BorderSizePixel = 0
-		ui.boardVisualGroup.Size = UDim2.fromScale(1, 1)
-		ui.boardVisualGroup.Parent = ui.boardContent
-		if ui.boardVisualGroup:IsA("CanvasGroup") then
-			ui.boardVisualGroup.GroupTransparency = 0
-		end
-	end
-	ui.puzzleGrid = ui.boardContent and ((ui.boardVisualGroup and ui.boardVisualGroup:FindFirstChild("PuzzleGrid")) or ui.boardContent:FindFirstChild("PuzzleGrid") or create("Frame", {
-		Name = "PuzzleGrid",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ClipsDescendants = true,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(1, 1),
-		Parent = ui.boardVisualGroup or ui.boardContent,
-	})) or nil
-	if ui.puzzleGrid then
-		ui.puzzleGrid.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.puzzleGrid.Position = UDim2.fromScale(0.5, 0.5)
-		ui.puzzleGrid.BackgroundTransparency = 1
-		ui.puzzleGrid.BorderSizePixel = 0
-		ui.puzzleGrid.ClipsDescendants = true
-		ui.puzzleGrid.Size = UDim2.fromScale(1, 1)
-		if ui.puzzleGrid.Parent ~= (ui.boardVisualGroup or ui.boardContent) then
-			ui.puzzleGrid.Parent = ui.boardVisualGroup or ui.boardContent
-		end
-
-		local puzzleGridAspect = ui.puzzleGrid:FindFirstChild("PuzzleGridAspectRatio")
-		if not puzzleGridAspect then
-			puzzleGridAspect = create("UIAspectRatioConstraint", {
-				Name = "PuzzleGridAspectRatio",
-				AspectRatio = 1,
-				AspectType = Enum.AspectType.FitWithinMaxSize,
-				Parent = ui.puzzleGrid,
-			})
-		end
-	end
-	ui.tileLayer = ui.puzzleGrid and (ui.puzzleGrid:FindFirstChild("TileLayer") or create("Frame", {
-		Name = "TileLayer",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ClipsDescendants = true,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(1, 1),
-		ZIndex = 4,
-		Parent = ui.puzzleGrid,
-	})) or nil
-	if ui.tileLayer then
-		ui.tileLayer.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.tileLayer.Position = UDim2.fromScale(0.5, 0.5)
-		ui.tileLayer.BackgroundTransparency = 1
-		ui.tileLayer.BorderSizePixel = 0
-		ui.tileLayer.ClipsDescendants = true
-		ui.tileLayer.Size = UDim2.fromScale(1, 1)
-		if ui.tileLayer.Parent ~= ui.puzzleGrid then
-			ui.tileLayer.Parent = ui.puzzleGrid
-		end
-	end
-	syncBoardContentLayout()
-	ui.lineLayer = findDescendantByNames(ui.puzzleGrid or ui.boardContent, { "LineLayer" }, nil)
-	if not ui.lineLayer then
-		ui.lineLayer = create("Frame", {
-			Name = "LineLayer",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromScale(1, 1),
-			ZIndex = LAYOUT.LineLayerZIndex,
-			Parent = ui.puzzleGrid or ui.boardContent,
-		})
-	end
-	if ui.puzzleGrid and ui.lineLayer.Parent ~= ui.puzzleGrid then
-		ui.lineLayer.Parent = ui.puzzleGrid
-	end
-	if ui.lineLayer then
-		ui.lineLayer.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.lineLayer.BackgroundTransparency = 1
-		ui.lineLayer.BorderSizePixel = 0
-		ui.lineLayer.Position = UDim2.fromScale(0.5, 0.5)
-		ui.lineLayer.Size = UDim2.fromScale(1, 1)
-		ui.lineLayer.ZIndex = LAYOUT.LineLayerZIndex
-	end
-
-	ui.persistentLineLayer = findDescendantByNames(ui.lineLayer, { "PersistentLineLayer" }, nil)
-	if not ui.persistentLineLayer then
-		ui.persistentLineLayer = create("Frame", {
-			Name = "PersistentLineLayer",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromScale(1, 1),
-			ZIndex = LAYOUT.PersistentLineLayerZIndex,
-			Parent = ui.lineLayer,
-		})
-	end
-	if ui.persistentLineLayer then
-		if ui.persistentLineLayer.Parent ~= ui.lineLayer then
-			ui.persistentLineLayer.Parent = ui.lineLayer
-		end
-		ui.persistentLineLayer.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.persistentLineLayer.BackgroundTransparency = 1
-		ui.persistentLineLayer.BorderSizePixel = 0
-		ui.persistentLineLayer.Position = UDim2.fromScale(0.5, 0.5)
-		ui.persistentLineLayer.Size = UDim2.fromScale(1, 1)
-		ui.persistentLineLayer.ZIndex = LAYOUT.PersistentLineLayerZIndex
-		for _, child in ipairs(ui.persistentLineLayer:GetChildren()) do
-			if child:IsA("Frame") then
-				if string.find(child.Name, "Glow") then
-					child.ZIndex = LAYOUT.PersistentLineGlowZIndex
-				else
-					child.ZIndex = LAYOUT.PersistentLineZIndex
-				end
+function InterfaceController.UpdateQueue(ui, members)
+	local players = game:GetService("Players")
+	if not members or #members == 0 then ui.queuePalette = nil end
+	ui.queuePalette = ui.queuePalette or Effects.NewPortraitPalette(ui.queuePortraitRandom)
+	local present = {}
+	for index, member in ipairs(members or {}) do
+		local userId = member.userId
+		present[userId] = true
+		local entry = ui.queueEntries[userId]
+		if not entry then
+			entry = ui.queueTemplate:Clone()
+			entry.Name = "QueuePlayer_" .. userId
+			entry.Visible = true
+			entry.Parent = ui.queueContainer
+			ui.queueEntries[userId] = entry
+			Effects.PopIn(entry)
+			local portrait = entry:FindFirstChild("YouMugshot")
+			if portrait and (portrait:IsA("ImageLabel") or portrait:IsA("ImageButton")) then
+				-- Choose once per queued card; roster refreshes retain the same color.
+				local color = ui.queuePalette.Next()
+				portrait.BackgroundColor3, portrait.BackgroundTransparency = color, 0
+				local stroke = portrait:FindFirstChildOfClass("UIStroke")
+				if stroke then stroke.Color = color:Lerp(Color3.new(0, 0, 0), 0.3) end
+				portrait.Image = ""
+				Effects.SetPortraitImage(portrait, member.thumbnailImage)
+				if not member.isBot then task.spawn(function()
+					local ok, image = pcall(players.GetUserThumbnailAsync, players, userId,
+						Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+					if ok and entry.Parent and ui.queueEntries[userId] == entry then Effects.SetPortraitImage(portrait, image) end
+				end) end
 			end
 		end
+		entry.LayoutOrder = index
+		local title = entry:FindFirstChild("Title")
+		if title and (title:IsA("TextLabel") or title:IsA("TextButton")) then
+			title.Text = member.displayName or member.name or tostring(userId)
+		end
+		local level = path(entry, { "Star", "Level" })
+		if level then level.Text = tostring(member.level or 1) end
 	end
-
-	ui.dragGlow = findDescendantByNames(ui.lineLayer, { "DragGlow" }, "Frame")
-	ui.dragLine = findDescendantByNames(ui.lineLayer, { "DragLine" }, "Frame")
-	if not ui.dragGlow or not ui.dragLine then
-		createDragLineObjects()
-	end
-	if ui.dragGlow then
-		ui.dragGlow.ZIndex = LAYOUT.DragGlowZIndex
-	end
-	if ui.dragLine then
-		ui.dragLine.ZIndex = LAYOUT.DragLineZIndex
-	end
-
-	ui.boardCursorRoot = findDescendantByNames(ui.puzzleGrid or ui.boardContent, { "GamepadCursor", "ConsoleCursor" }, "Frame")
-	if not ui.boardCursorRoot and ui.puzzleGrid then
-		ui.boardCursorRoot = create("Frame", {
-			Name = "GamepadCursor",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-			BackgroundTransparency = 0.9,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Selectable = false,
-			Size = UDim2.fromOffset(0, 0),
-			Visible = false,
-			ZIndex = LAYOUT.GamepadCursorZIndex,
-			Parent = ui.puzzleGrid,
-		})
-		create("UICorner", {
-			CornerRadius = UDim.new(1, 0),
-			Parent = ui.boardCursorRoot,
-		})
-		ui.boardCursorGlow = create("Frame", {
-			Name = "Glow",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = Color3.fromRGB(255, 241, 138),
-			BackgroundTransparency = 0.94,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Selectable = false,
-			Size = UDim2.fromScale(1.2, 1.2),
-			ZIndex = LAYOUT.GamepadCursorGlowZIndex,
-			Parent = ui.boardCursorRoot,
-		})
-		create("UICorner", {
-			CornerRadius = UDim.new(1, 0),
-			Parent = ui.boardCursorGlow,
-		})
-		ui.boardCursorStroke = create("UIStroke", {
-			Name = "Stroke",
-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Color = Color3.fromRGB(255, 241, 138),
-			Thickness = 3,
-			Transparency = 0.12,
-			Parent = ui.boardCursorRoot,
-		})
-	end
-	ui.boardCursorGlow = ui.boardCursorGlow
-		or (ui.boardCursorRoot and findDescendantByNames(ui.boardCursorRoot, { "Glow" }, "Frame"))
-		or nil
-	ui.boardCursorStroke = ui.boardCursorStroke
-		or (ui.boardCursorRoot and (ui.boardCursorRoot:FindFirstChild("Stroke") or ui.boardCursorRoot:FindFirstChildWhichIsA("UIStroke")))
-		or nil
-	ui.boardCursorScale = ui.boardCursorRoot and ensureScaleController(ui.boardCursorRoot) or nil
-	if ui.boardCursorRoot then
-		ui.boardCursorRoot.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.boardCursorRoot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		ui.boardCursorRoot.BackgroundTransparency = 0.9
-		ui.boardCursorRoot.BorderSizePixel = 0
-		ui.boardCursorRoot.Position = UDim2.fromScale(0.5, 0.5)
-		ui.boardCursorRoot.Size = UDim2.fromOffset(0, 0)
-		ui.boardCursorRoot.Visible = false
-		ui.boardCursorRoot.ZIndex = LAYOUT.GamepadCursorZIndex
-		if ui.boardCursorRoot.Parent ~= ui.puzzleGrid then
-			ui.boardCursorRoot.Parent = ui.puzzleGrid
+	for userId, entry in pairs(ui.queueEntries) do
+		if not present[userId] then
+			ui.queueEntries[userId] = nil
+			entry:Destroy()
 		end
 	end
-	if ui.boardCursorGlow then
-		ui.boardCursorGlow.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.boardCursorGlow.BackgroundColor3 = Color3.fromRGB(255, 241, 138)
-		ui.boardCursorGlow.BackgroundTransparency = 0.94
-		ui.boardCursorGlow.BorderSizePixel = 0
-		ui.boardCursorGlow.Position = UDim2.fromScale(0.5, 0.5)
-		ui.boardCursorGlow.Size = UDim2.fromScale(1.2, 1.2)
-		ui.boardCursorGlow.ZIndex = LAYOUT.GamepadCursorGlowZIndex
-	end
-	if ui.boardCursorStroke then
-		ui.boardCursorStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		ui.boardCursorStroke.Color = Color3.fromRGB(255, 241, 138)
-		ui.boardCursorStroke.Thickness = 3
-		ui.boardCursorStroke.Transparency = 0.12
-	end
+end
 
-	if ui.boardHolder and not ui.boardHolder:GetAttribute("WordSearchBoardResizeBound") then
-		ui.boardHolder:SetAttribute("WordSearchBoardResizeBound", true)
-		ui.boardHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-			syncBoardContentLayout()
-			if state.currentPuzzle then
-				refreshPersistentLines()
-				RuntimeHelpers.refreshBoard()
-				if state.dragging and state.dragCursorPosition then
-					RuntimeHelpers.updateDragTarget(state.dragCursorPosition)
-				end
-			end
-		end)
-	end
+function InterfaceController.UpdateQueueTimer(ui, seconds)
+	ui.queueSubtitle.Text = string.format("Classic Mode (%ds)", math.max(0, math.ceil(seconds)))
+end
 
-	ui.bottomBarShell = findDescendantByNames(gameFrame or existingGui, { "BottomBarShell" }, nil)
-	ui.buttonBar = findDescendantByNames(gameFrame or existingGui, { "ButtonBar" }, nil)
-	ui.hintRoot = hintRoot
-	ui.hintButton = hintButton
-	ui.hintLabel = nil
-	if hintButton and (hintButton:IsA("TextButton") or hintButton:IsA("TextLabel")) then
-		ui.hintLabel = hintButton
-	elseif hintRoot then
-		for _, descendant in ipairs(hintRoot:GetDescendants()) do
-			if (descendant:IsA("TextLabel") or descendant:IsA("TextButton"))
-				and descendant.Name ~= "Amount"
-				and descendant:FindFirstAncestor("Notification") == nil then
-				ui.hintLabel = descendant
-				break
-			end
-		end
+-- Presentation only: a future Timed controller supplies seconds remaining and total.
+-- Passing nil clears stale time without starting a local countdown.
+function InterfaceController.UpdateTimedTimer(ui, remaining, duration, immediate)
+	local valid = type(remaining) == "number" and remaining == remaining and math.abs(remaining) < math.huge
+		and type(duration) == "number" and duration > 0 and duration < math.huge
+	local seconds = valid and math.clamp(remaining, 0, duration) or 0
+	local fraction = valid and seconds / duration or 1
+	local label, fill = ui.timedTimeLeft, ui.timedFill
+	if label and (label:IsA("TextLabel") or label:IsA("TextButton")) then
+		local rounded = math.ceil(seconds)
+		label.Text = valid and string.format("%02d:%02d", math.floor(rounded / 60), rounded % 60) or "--:--"
 	end
-	ui.hintLabelBaseTransparency = ui.hintLabel
-		and (ui.hintLabel:IsA("TextButton") or ui.hintLabel:IsA("TextLabel"))
-		and ui.hintLabel.TextTransparency
-		or 0
-	ui.hintLocked = (hintRoot and findDescendantByNames(hintRoot, { "Locked" }, nil))
-		or (hintButton and findDescendantByNames(hintButton, { "Locked" }, nil))
-	if ui.hintLocked and ui.hintLocked:IsA("GuiObject") then
-		ui.hintLocked.Visible = false
+	if not fill or not fill:IsA("GuiObject") then return end
+	local state = ui.timedBarState
+	if state and state.fill ~= fill then
+		if state.tween then state.tween:Cancel() end
+		state = nil
 	end
-	ui.nextButton = nextButton
-	ui.duelModeRoot = duelModeRoot
-	local duelModeTitleRoot = duelModeRoot and (
-		duelModeRoot:FindFirstChild("Title")
-			or findDescendantByNames(duelModeRoot, { "Title" }, nil)
-	) or nil
-	local duelModeOpponentRoot = duelModeRoot and (
-		duelModeRoot:FindFirstChild("Opponent")
-			or findDescendantByNames(duelModeRoot, { "Opponent" }, nil)
-	) or nil
-	ui.duelModeTitleLabel = duelModeTitleRoot and findTextObject(duelModeTitleRoot, { "Title", "Label", "TextLabel" }) or nil
-	ui.duelModeOpponentLabel = duelModeOpponentRoot and findTextObject(duelModeOpponentRoot, { "Opponent", "Label", "TextLabel" }) or nil
-	ui.duelModeProgressBar = duelModeRoot and (duelModeRoot:FindFirstChild("Bar") or duelModeRoot:FindFirstChild("ProgressBar") or findDescendantByNames(duelModeRoot, { "Bar", "ProgressBar" }, nil)) or nil
-	ui.duelModeProgressBarFrame = ui.duelModeProgressBar and (
-		ui.duelModeProgressBar:FindFirstChild("Frame")
-			or findDescendantByNames(ui.duelModeProgressBar, { "Frame" }, nil)
-	) or nil
-	local duelModeFillRoot = ui.duelModeProgressBarFrame or ui.duelModeProgressBar
-	ui.duelModeMyFill = duelModeFillRoot and (duelModeFillRoot:FindFirstChild("MyFill") or findDescendantByNames(duelModeFillRoot, { "MyFill" }, nil)) or nil
-	ui.duelModeOppFill = duelModeFillRoot and (duelModeFillRoot:FindFirstChild("OppFill") or findDescendantByNames(duelModeFillRoot, { "OppFill" }, nil)) or nil
-	ui.duelModeMyLabel = duelModeFillRoot and (
-		duelModeFillRoot:FindFirstChild("MyLabel")
-			or duelModeFillRoot:FindFirstChild("MyPercent")
-			or findDescendantByNames(duelModeFillRoot, { "MyLabel", "MyPercent" }, "TextLabel")
-			or findDescendantByNames(duelModeFillRoot, { "MyLabel", "MyPercent" }, "TextButton")
-	) or nil
-	ui.duelModeOppLabel = duelModeFillRoot and (
-		duelModeFillRoot:FindFirstChild("OppLabel")
-			or duelModeFillRoot:FindFirstChild("OppPercent")
-			or findDescendantByNames(duelModeFillRoot, { "OppLabel", "OppPercent" }, "TextLabel")
-			or findDescendantByNames(duelModeFillRoot, { "OppLabel", "OppPercent" }, "TextButton")
-	) or nil
-	if ui.duelModeRoot and ui.duelModeRoot:IsA("GuiObject") then
-		ui.duelModeRoot.Visible = false
+	if not state then
+		state = { fill = fill, height = fill.Size.Y }
+		ui.timedBarState = state
+		immediate = true
 	end
-	if ui.duelModeMyLabel then
-		ui.duelModeMyLabel.Text = "0%"
-	end
-	if ui.duelModeOppLabel then
-		ui.duelModeOppLabel.Text = "0%"
-	end
-	if ui.duelModeMyFill and ui.duelModeMyFill:IsA("GuiObject") then
-		ui.duelModeMyFill.Size = UDim2.new(DUEL_MODE_MIN_FILL_SCALE, 0, 1, 0)
-	end
-	if ui.duelModeOppFill and ui.duelModeOppFill:IsA("GuiObject") then
-		ui.duelModeOppFill.Size = UDim2.new(DUEL_MODE_MIN_FILL_SCALE, 0, 1, 0)
-	end
-	ui.alertsRoot = alertsRoot
-	ui.alertsList = alertsList
-	ui.countdownFrame = countdownFrame
-	ui.countdownLabel = countdownLabel
-	ui.countdownCard = nil
-	ui.countdownCardScale = nil
-	ui.countdownCardStroke = nil
-	ui.countdownLabelScale = nil
-	if ui.alertsRoot and ui.alertsRoot:IsA("GuiObject") then
-		ui.alertsRoot.Visible = true
-	end
-	local rewardToastRoot = (findFirstPath and findFirstPath(gameFrame or existingGui, {
-		{ "RewardToast" },
-		{ "TopBar", "RewardToast" },
-		{ "ContentFrame", "RewardToast" },
-	}, nil))
-		or findDescendantByNames(gameFrame or menuFrame or existingGui, { "RewardToast" }, nil)
-	ui.rewardToastRoot = rewardToastRoot
-	ui.rewardToast = rewardToastRoot and (
-		(rewardToastRoot:IsA("TextLabel") or rewardToastRoot:IsA("TextButton")) and rewardToastRoot
-			or (findFirstPath and findFirstPath(rewardToastRoot, {
-				{ "Label" },
-				{ "TextLabel" },
-				{ "Text" },
-			}, nil))
-			or findDescendantByNames(rewardToastRoot, { "Label", "TextLabel", "Text" }, nil)
-	) or nil
-	if not ui.rewardToast and rewardToastRoot then
-		ui.rewardToast = findTextObject(rewardToastRoot, { "Label", "TextLabel", "Text" })
-	end
-	if ui.rewardToast and not (ui.rewardToast:IsA("TextLabel") or ui.rewardToast:IsA("TextButton")) then
-		ui.rewardToast = findTextObject(ui.rewardToast, { "Label", "TextLabel", "Text" })
-	end
-	local rewardToastScaleTarget = (ui.rewardToastRoot and ui.rewardToastRoot:IsA("GuiObject") and ui.rewardToastRoot) or ui.rewardToast
-	ui.rewardToastScale = rewardToastScaleTarget and ensureScaleController(rewardToastScaleTarget) or nil
-	if ui.rewardToastRoot and ui.rewardToastRoot:IsA("GuiObject") then
-		ui.rewardToastRoot.Visible = false
-	elseif ui.rewardToast and ui.rewardToast:IsA("GuiObject") then
-		ui.rewardToast.Visible = false
-	end
-	if not ui.countdownFrame then
-		ui.countdownFrame = create("Frame", {
-			Name = "RuntimeCountdown",
-			BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0, 0),
-			Size = UDim2.fromScale(1, 1),
-			Visible = false,
-			ZIndex = 90,
-			Parent = framesRoot or existingGui,
-		})
+	if state.fraction == fraction and not immediate then return end
+	state.fraction = fraction
+	if state.tween then state.tween:Cancel() state.tween = nil end
+	local green, yellow, red = Color3.fromRGB(75, 202, 53), Color3.fromRGB(255, 196, 54), Color3.fromRGB(202, 61, 51)
+	local color = fraction >= 0.5 and green:Lerp(yellow, (1 - fraction) * 2)
+		or yellow:Lerp(red, 1 - fraction * 2)
+	local size = UDim2.new(fraction, 0, state.height.Scale, state.height.Offset)
+	if immediate or not valid then
+		fill.Size, fill.BackgroundColor3 = size, color
 	else
-		ui.countdownFrame.Visible = false
-	end
-	if ui.countdownFrame then
-		ui.countdownCard = ui.countdownFrame:FindFirstChild("Card") or create("Frame", {
-			Name = "Card",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = Color3.fromRGB(12, 18, 28),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromScale(0.34, 0.26),
-			ZIndex = 90,
-			Parent = ui.countdownFrame,
+		state.tween = TweenService:Create(fill, TweenInfo.new(0.18, Enum.EasingStyle.Linear), {
+			Size = size, BackgroundColor3 = color,
 		})
-		if not ui.countdownCard:FindFirstChild("Corner") then
-			create("UICorner", {
-				Name = "Corner",
-				CornerRadius = UDim.new(0.12, 0),
-				Parent = ui.countdownCard,
-			})
-		end
-		ui.countdownCardStroke = ui.countdownCard:FindFirstChild("Stroke")
-		if not ui.countdownCardStroke then
-			ui.countdownCardStroke = create("UIStroke", {
-				Name = "Stroke",
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = Color3.fromRGB(240, 246, 255),
-				Thickness = 1.5,
-				Transparency = 1,
-				Parent = ui.countdownCard,
-			})
-		end
-		ui.countdownCardScale = ensureScaleController(ui.countdownCard)
+		state.tween:Play()
 	end
-	if not ui.countdownLabel then
-		ui.countdownLabel = create("TextLabel", {
-			Name = "Label",
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.new(0.464, 0, 0.26, 0),
-			Text = "",
-			TextColor3 = COLORS.text,
-			TextScaled = true,
-			ZIndex = 91,
-			Parent = ui.countdownFrame,
+end
+
+-- Keep a level-up flourish running while newer snapshots update its final target.
+local function updateLevelFill(ui, root, fill, star, currentLevel, xp, requiredXp)
+	local previous = ui.levelBarFeedback[root]
+	if previous and previous.fill ~= fill then
+		if previous.animation then previous.animation:Cancel() end
+		previous = nil
+	end
+	if previous and previous.level == currentLevel and previous.xp == xp and previous.required == requiredXp then return end
+	local gainedLevel = previous and currentLevel > previous.level
+	local gainedXp = previous and (gainedLevel or (currentLevel == previous.level and xp > previous.xp))
+	if previous and previous.celebrating and currentLevel >= previous.level then
+		previous.level, previous.xp, previous.required = currentLevel, xp, requiredXp
+		return
+	end
+	if previous and previous.animation then previous.animation:Cancel() end
+	local state = {
+		fill = fill, level = currentLevel, xp = xp, required = requiredXp,
+		green = previous and previous.green or fill.BackgroundColor3,
+		celebrating = gainedLevel == true,
+	}
+	ui.levelBarFeedback[root] = state
+	local function valid()
+		return ui.levelBarFeedback[root] == state and fill.Parent ~= nil and path(root, { "FillBar", "Fill" }) == fill
+	end
+	local function tween(duration, properties)
+		state.animation = TweenService:Create(fill, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), properties)
+		state.animation:Play()
+	end
+	local function settle()
+		if not valid() then return end
+		state.celebrating = false
+		tween(0.5, {
+			Size = UDim2.fromScale(math.clamp(state.xp / math.max(1, state.required), 0.1, 1), 1),
+			BackgroundColor3 = state.green,
 		})
 	end
-	if ui.countdownLabel then
-		ui.countdownLabel.TextTransparency = 1
-		ui.countdownLabel.TextStrokeColor3 = Color3.fromRGB(5, 8, 14)
-		ui.countdownLabel.TextStrokeTransparency = 1
-		ui.countdownLabelScale = ensureScaleController(ui.countdownLabel)
+	if gainedLevel then
+		local gold = Color3.fromRGB(255, 211, 92)
+		tween(0.35, { Size = UDim2.fromScale(1, 1), BackgroundColor3 = gold })
+		if star then Effects.Pulse(star, 1.12) Effects.SoftHighlight(star, gold) end
+		task.delay(0.47, function()
+			if not valid() then return end
+			tween(0.4, { Size = UDim2.fromScale(0.1, 1), BackgroundColor3 = state.green })
+			task.delay(0.4, settle)
+		end)
+	else
+		settle()
+		if gainedXp then Effects.SoftHighlight(fill, state.green:Lerp(Color3.new(1, 1, 1), 0.45)) end
 	end
-	local summaryRoot = (findFirstPath and findFirstPath(framesRoot or existingGui, {
-		{ "GameOutcome" },
-		{ "SummaryOverlay" },
-	}, nil))
-		or findDescendantByNames(framesRoot or existingGui, { "GameOutcome", "SummaryOverlay" }, nil)
-	ui.summaryOverlay = summaryRoot
-	ui.summaryCard = (summaryRoot and (
-		(findFirstPath and findFirstPath(summaryRoot, {
-			{ "Frame" },
-			{ "Card" },
-			{ "Container" },
-		}, nil))
-			or findDescendantByNames(summaryRoot, { "Frame", "Card", "Container" }, nil)
-	))
-		or findDescendantByNames(framesRoot or existingGui, { "SummaryCard" }, nil)
-		or summaryRoot
-	ui.summaryCardScale = ui.summaryCard and ui.summaryCard:FindFirstChildWhichIsA("UIScale") or nil
-	ui.summaryCardOpenSize = (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
-		and UDim2.fromScale(0.69, 0.69)
-		or UDim2.fromScale(0.6, 0.6)
-	ui.summaryCardOpenPosition = UDim2.fromScale(0.5, 0.5)
-	ui.summaryOverlayOpenTransparency = resolveOverlayOpenTransparency(
-		(ui.summaryOverlay ~= ui.summaryCard and ui.summaryOverlay and ui.summaryOverlay.BackgroundTransparency) or nil
-	)
-	ui.summaryCardOpenTransparency = resolveCardOpenTransparency(
-		ui.summaryCard and ui.summaryCard.BackgroundTransparency or nil,
-		0.08
-	)
-	ui.summaryTitleLabel = (summaryRoot and findTextObject(
-		(findFirstPath and findFirstPath(summaryRoot, {
-			{ "Frame", "Title" },
-			{ "Title" },
-			{ "Frame", "Outcome" },
-			{ "Outcome" },
-			{ "Frame", "Header", "Title" },
-			{ "Header", "Title" },
-		}, nil))
-			or findDescendantByNames(summaryRoot, { "Title", "SummaryTitleLabel", "Outcome" }, nil)
-			or ui.summaryCard
-			or summaryRoot,
-		{ "Title", "SummaryTitleLabel", "Outcome", "Label", "TextLabel" }
-	))
-		or (ui.summaryCard and findTextObject(ui.summaryCard, { "Title", "SummaryTitleLabel", "Outcome" }))
-		or findTextObject(framesRoot or existingGui, { "SummaryTitleLabel" })
-	ui.summaryBodyLabel = (summaryRoot and findTextObject(
-		(findFirstPath and findFirstPath(summaryRoot, {
-			{ "Frame", "Body" },
-			{ "Frame", "Description" },
-			{ "Frame", "Sub" },
-			{ "Body" },
-			{ "Description" },
-			{ "Sub" },
-			{ "Frame", "Container", "Body" },
-			{ "Frame", "Container", "Description" },
-		}, nil))
-			or findDescendantByNames(summaryRoot, { "Body", "SummaryBodyLabel", "Description", "Desc", "Sub" }, nil)
-			or summaryRoot,
-		{ "Body", "SummaryBodyLabel", "Description", "Desc", "Sub", "Status", "Label", "TextLabel" }
-	))
-		or findTextObject(framesRoot or existingGui, { "SummaryBodyLabel" })
-	if not ui.summaryBodyLabel and ui.summaryCard and ui.summaryCard:IsA("GuiObject") then
-		ui.summaryBodyLabel = create("TextLabel", {
-			Name = "SummaryBodyRuntime",
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromScale(0.5, 0.2),
-			Size = UDim2.fromScale(0.78, 0.16),
-			Text = "",
-			TextColor3 = COLORS.textMuted,
-			TextScaled = true,
-			TextTransparency = 1,
-			TextWrapped = true,
-			TextYAlignment = Enum.TextYAlignment.Top,
-			ZIndex = (ui.summaryCard.ZIndex or 1) + 1,
-			Parent = ui.summaryCard,
-		})
-	end
-	local summaryButtonSearchRoot = ui.summaryCard or summaryRoot
-	local summaryButtonRoot = (summaryButtonSearchRoot and (
-		(findFirstPath and findFirstPath(summaryButtonSearchRoot, {
-			{ "Frame", "Buttons", "Green" },
-			{ "Frame", "Green" },
-			{ "Buttons", "Green" },
-			{ "Green" },
-			{ "Frame", "Buttons", "Green", "Button" },
-			{ "Frame", "Green", "Button" },
-			{ "Buttons", "Green", "Button" },
-			{ "Green", "Button" },
-			{ "Frame", "Continue", "Button" },
-			{ "Continue", "Button" },
-			{ "Frame", "Continue" },
-			{ "Continue" },
-			{ "SummaryButton" },
-		}, nil))
-			or findDescendantByNames(summaryButtonSearchRoot, { "SummaryButton", "Continue", "Home", "Next", "Green" }, nil)
-	)) or findDescendantByNames(framesRoot or existingGui, { "SummaryButton" }, nil)
-	ui.summaryButton = findButtonLike(summaryButtonRoot)
-	ui.summaryButtonLabel = summaryButtonRoot and (
-		(findFirstPath and findFirstPath(summaryButtonRoot, {
-			{ "Button", "Label" },
-			{ "Button", "TextLabel" },
-			{ "Label" },
-			{ "TextLabel" },
-		}, nil))
-			or ((ui.summaryButton and ui.summaryButton.Parent and ui.summaryButton.Parent ~= summaryButtonRoot) and (
-				(findFirstPath and findFirstPath(ui.summaryButton.Parent, {
-					{ "Label" },
-					{ "TextLabel" },
-				}, nil))
-					or findDescendantByNames(ui.summaryButton.Parent, { "Label", "TextLabel" }, nil)
-			))
-			or ((ui.summaryButton and ui.summaryButton ~= summaryButtonRoot) and (
-				(findFirstPath and findFirstPath(ui.summaryButton, {
-					{ "Label" },
-					{ "TextLabel" },
-				}, nil))
-					or findDescendantByNames(ui.summaryButton, { "Label", "TextLabel" }, nil)
-			))
-	) or nil
-	if ui.summaryButtonLabel and not (ui.summaryButtonLabel:IsA("TextLabel") or ui.summaryButtonLabel:IsA("TextButton")) then
-		ui.summaryButtonLabel = findTextObject(ui.summaryButtonLabel, { "Label", "TextLabel" })
-	end
-	ui.summaryButtonBaseTransparency = ui.summaryButton and ui.summaryButton.BackgroundTransparency or 0
-	ui.summaryStarsRoot = ui.summaryCard and findDescendantByNames(ui.summaryCard, { "Stars" }, nil) or nil
-	local summaryStarsTitleRoot = ui.summaryStarsRoot and findDescendantByNames(ui.summaryStarsRoot, { "Title" }, nil) or nil
-	ui.summaryStarsTitleLabel = summaryStarsTitleRoot and (
-		(summaryStarsTitleRoot:IsA("TextLabel") or summaryStarsTitleRoot:IsA("TextButton")) and summaryStarsTitleRoot
-			or findTextObject(summaryStarsTitleRoot, { "Title", "Label", "TextLabel" })
-	) or nil
-	ui.summaryStarOne = ui.summaryStarsRoot and findDescendantByNames(ui.summaryStarsRoot, { "StarOne" }, nil) or nil
-	ui.summaryStarTwo = ui.summaryStarsRoot and findDescendantByNames(ui.summaryStarsRoot, { "StarTwo" }, nil) or nil
-	ui.summaryStarThree = ui.summaryStarsRoot and findDescendantByNames(ui.summaryStarsRoot, { "StarThree" }, nil) or nil
-	ui.summaryStarOneScale = ui.summaryStarOne and ensureScaleController(ui.summaryStarOne) or nil
-	ui.summaryStarTwoScale = ui.summaryStarTwo and ensureScaleController(ui.summaryStarTwo) or nil
-	ui.summaryStarThreeScale = ui.summaryStarThree and ensureScaleController(ui.summaryStarThree) or nil
-	if ui.summaryStarsTitleLabel and ui.summaryStarsTitleLabel:IsA("GuiObject") then
-		ui.summaryStarsTitleLabel.Visible = false
-	end
-	do
-		local summaryCurrencyNode = ui.summaryCard and findDescendantByNames(ui.summaryCard, { "CurrencyEarnt", "CurrencyEarned" }, nil) or nil
-		ui.summaryCurrencyEarnedLabel = summaryCurrencyNode
-			and (summaryCurrencyNode:IsA("TextLabel") or summaryCurrencyNode:IsA("TextButton"))
-			and summaryCurrencyNode
-			or nil
-	end
-	ui.summaryGiftRoot = ui.summaryCard and findDescendantByNames(ui.summaryCard, { "Gift" }, nil) or nil
-	ui.summaryGiftFill = ui.summaryGiftRoot and findDescendantByNames(ui.summaryGiftRoot, { "Fill" }, nil) or nil
-	ui.summaryGiftText = ui.summaryGiftRoot and findTextObject(ui.summaryGiftRoot, { "TextLabel", "Label" }) or nil
-	ui.summaryGiftIcon = ui.summaryGiftRoot and (
-		findDescendantByNames(ui.summaryGiftRoot, { "ImageLabel" }, nil)
-			or ui.summaryGiftRoot:FindFirstChildWhichIsA("ImageLabel", true)
-	) or nil
-	ui.summaryGiftButton = ui.summaryGiftRoot and findButtonLike(ui.summaryGiftRoot) or nil
-	if not ui.summaryGiftButton and ui.summaryGiftRoot and ui.summaryGiftRoot:IsA("GuiObject") then
-		ui.summaryGiftButton = ui.summaryGiftRoot:FindFirstChild("ClaimButton")
-		if not ui.summaryGiftButton then
-			ui.summaryGiftButton = create("TextButton", {
-				Name = "ClaimButton",
-				AutoButtonColor = false,
-				BackgroundTransparency = 1,
-				BorderSizePixel = 0,
-				Position = UDim2.fromScale(0, 0),
-				Size = UDim2.fromScale(1, 1),
-				Text = "",
-				ZIndex = (ui.summaryGiftRoot.ZIndex or 1) + 1,
-				Parent = ui.summaryGiftRoot,
-			})
-		end
-	end
-	if ui.summaryOverlay and ui.summaryOverlay:IsA("GuiObject") then
-		ui.summaryOverlay.Visible = false
-	end
-	if ui.summaryCard and ui.summaryCard ~= ui.summaryOverlay and ui.summaryCard:IsA("GuiObject") then
-		ui.summaryCard.AnchorPoint = Vector2.new(0.5, 0.5)
-		ui.summaryCard.Position = ui.summaryCardOpenPosition
-		ui.summaryCard.Size = UDim2.fromScale(0, 0)
-		ui.summaryCard.Visible = false
-	end
+end
 
-	RuntimeHelpers.bindClassicLevelsUi(existingGui, framesRoot)
-
-	ui.modeChip = nil
-	ui.secondaryChip = nil
-	ui.scoreChip = nil
-	ui.rewardChip = nil
-	ui.modeChipLabel = nil
-	ui.secondaryChipLabel = nil
-	ui.scoreChipLabel = nil
-	ui.rewardChipLabel = nil
-	ui.modeChipScale = nil
-	ui.secondaryChipScale = nil
-	ui.scoreChipScale = nil
-	ui.rewardChipScale = nil
-
-	ui.menuActionRow = menuActionRow
-	ui.menuPlayRoot = menuPlayRoot
-	ui.menuPlayButton = findButtonLike(menuPlayRoot)
-	ui.menuPlayLocked = menuPlayRoot and findDescendantByNames(menuPlayRoot, { "Locked" }, nil) or nil
-	if ui.menuPlayLocked and ui.menuPlayLocked:IsA("GuiObject") then
-		ui.menuPlayLocked.Visible = false
+-- Shared by the Home/Game bars and the authored outcome progress bar.
+function InterfaceController.UpdateProgressFill(ui, root, progression)
+	progression = progression or {}
+	local level, xp = progression.level or 1, progression.xp or 0
+	local required = progression.xpToNextLevel or Experience.RequiredForLevel(level)
+	ui.levelBarFeedback = ui.levelBarFeedback or setmetatable({}, { __mode = "k" })
+	local fill = root and path(root, { "FillBar", "Fill" })
+	if fill then
+		if fill.Size.X.Scale < 0.1 then fill.Size = UDim2.fromScale(0.1, 1) end
+		updateLevelFill(ui, root, fill, root:FindFirstChild("Star"), level, xp, required)
 	end
-	ui.menuDuelRoot = menuDuelRoot
-	ui.menuDuelButton = findButtonLike(menuDuelRoot)
-	ui.menuModeCarousel = menuModeCarousel
-	ui.menuModeNextButton = findButtonLike(findDescendantByNames(menuModeCarousel, { "NextModeBtn", "Next" }, nil))
-	ui.menuModePrevButton = findButtonLike(findDescendantByNames(menuModeCarousel, { "PrevModeBtn", "Previous" }, nil))
-	ui.menuModePreviewImage = findDescendantByNames(menuModeCarousel, { "ModePreviewImage" }, nil)
-	ui.menuModeNameLabel = menuModeCarousel and findTextObject(menuModeCarousel, { "ModeNameLabel", "TextLabel", "Title" }) or nil
-	ui.menuModeSubLabel = menuModeCarousel and findTextObject(menuModeCarousel, { "SubLabel", "Subtitle", "Description" }) or nil
-	ui.menuModeLocked = menuModeCarousel and findDescendantByNames(menuModeCarousel, { "Locked" }, nil) or nil
-	if ui.menuModeLocked and ui.menuModeLocked:IsA("GuiObject") then
-		ui.menuModeLocked.Visible = false
-	end
+	return level, xp, required
+end
 
-	ButtonUi.prepare(ui.menuPlayButton)
-	ButtonUi.prepare(ui.menuDuelButton)
-	bindButtonHoverSound(ui.menuModeNextButton)
-	bindButtonHoverSound(ui.menuModePrevButton)
-	if ui.hintRoot and ui.hintRoot:IsA("GuiButton") and ui.hintRoot ~= ui.hintButton then
-		ButtonUi.prepare(ui.hintRoot)
-	end
-	ButtonUi.prepare(ui.hintButton)
-	ButtonUi.prepare(ui.nextButton, COLORS.buttonPrimary)
-	ButtonUi.prepare(ui.exitButton, nil, 0)
-	ButtonUi.prepare(ui.summaryButton, COLORS.buttonPrimary)
+-- One cancellable presentation shared by normal and Duel outcomes.
+local outcomeSequences = setmetatable({}, { __mode = "k" })
 
-	if ui.wordListScroll then
-		local runtimeWordListLayout = ui.wordListScroll:FindFirstChild("WordListLayout")
-		if runtimeWordListLayout then
-			runtimeWordListLayout:Destroy()
-		end
-		local runtimeWordListGrid = ui.wordListScroll:FindFirstChildOfClass("UIGridLayout")
-		if runtimeWordListGrid then
-			runtimeWordListGrid:Destroy()
-		end
-		local runtimeWordListList = ui.wordListScroll:FindFirstChildOfClass("UIListLayout")
-		if runtimeWordListList then
-			runtimeWordListList:Destroy()
-		end
-		if not ui.wordListScroll:GetAttribute("WordSearchResizeBound") then
-			ui.wordListScroll:SetAttribute("WordSearchResizeBound", true)
-			ui.wordListScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-				if state.currentPuzzle and updateWordsLabel then
-					updateWordsLabel()
-				end
-			end)
-		end
-	end
+function InterfaceController.CancelOutcome(frame)
+	local sequence = frame and outcomeSequences[frame]
+	if sequence then sequence.cancel() end
+end
 
+function InterfaceController.OutcomeButtonsReady(frame)
+	local sequence = frame and outcomeSequences[frame]
+	return not sequence or sequence.ready == true
+end
+
+local function totalExperience(progression)
+	progression = progression or {}
+	return Experience.TotalForLevel(progression.level or 1) + math.max(0, progression.xp or 0)
+end
+
+local function progressionAt(total)
+	local level, xp, required = Experience.Resolve(math.max(0, total))
+	return { level = level, xp = xp, xpToNextLevel = required }
+end
+
+function InterfaceController.UpdateOutcome(frame, progression)
+	local sequence = frame and outcomeSequences[frame]
+	if not sequence then return false end
+	local total = math.max(sequence.targetTotal, totalExperience(progression))
+	if total ~= sequence.targetTotal then
+		sequence.targetTotal = total
+		if sequence.barStarted then sequence.drawProgress() end
+	end
 	return true
 end
 
-return {
-	bindExistingUI = RuntimeHelpers.bindExistingUI,
-}
+function InterfaceController.OutcomeWords(found, total, duration)
+	local words = string.format("%d/%d Words", found, total)
+	if type(duration) ~= "number" or duration ~= duration or duration == math.huge then return words end
+	if duration > 1800 then return words .. ": Scenic route!" end
+	local seconds = math.max(0, math.floor(duration))
+	return string.format("%s in %02d:%02d", words, math.floor(seconds / 60), seconds % 60)
 end
 
+function InterfaceController.PlayOutcome(owner, frame, result, progression)
+	InterfaceController.CancelOutcome(frame)
+	local awarded = math.max(0, math.floor(result.xpEarned or 0))
+	local startTotal = result.beforeProgression and totalExperience(result.beforeProgression)
+		or math.max(0, totalExperience(progression) - awarded)
+	local before = progressionAt(startTotal)
+	local sequence = { ready = false, targetTotal = math.max(startTotal + awarded, totalExperience(progression)),
+		tweens = {}, originals = {}, connections = {}, barRevision = 0 }
+	outcomeSequences[frame] = sequence
+	local function valid() return outcomeSequences[frame] == sequence and frame.Parent ~= nil end
+	local function later(seconds, callback)
+		task.delay(seconds, function() if valid() and frame.Visible then callback() end end)
+	end
+	local function tween(node, seconds, properties, bounce)
+		local animation = TweenService:Create(node, TweenInfo.new(seconds,
+			bounce and Enum.EasingStyle.Back or Enum.EasingStyle.Sine, Enum.EasingDirection.Out), properties)
+		table.insert(sequence.tweens, animation)
+		animation:Play()
+	end
+	local function prepare(name, scaleIn)
+		local node = frame:FindFirstChild(name)
+		if not node or not node:IsA("GuiObject") then return nil end
+		local original = { node = node, visible = node.Visible, active = node.Active, selectable = node.Selectable }
+		if node:IsA("TextLabel") or node:IsA("TextButton") then original.alpha = node.TextTransparency end
+		if scaleIn then
+			original.scale = node:FindFirstChildOfClass("UIScale")
+			original.created = not original.scale
+			if not original.scale then
+				original.scale = Instance.new("UIScale")
+				original.scale.Name, original.scale.Parent = "OutcomeScale", node
+			end
+			original.size = original.scale.Scale
+		end
+		node.Visible = false
+		if node:IsA("GuiButton") then node.Active, node.Selectable = false, false end
+		table.insert(sequence.originals, original)
+		return original
+	end
+	local words, xp = prepare("Words"), prepare("XPWon", true)
+	local bar, current = prepare("FillBar", true), prepare("CurrentXP")
+	local buttons = {}
+	for _, name in ipairs({ "Play", "Rematch", "Home" }) do
+		local button = prepare(name, true)
+		if button then table.insert(buttons, button) end
+	end
+	local function reveal(original, fromScale)
+		if not original then return end
+		local node = original.node
+		if node.Name == "Rematch" and frame:GetAttribute("RematchAvailable") ~= true then return end
+		node.Visible = true
+		if original.alpha ~= nil then
+			node.TextTransparency = 1
+			tween(node, 0.25, { TextTransparency = original.alpha })
+		end
+		if original.scale then
+			original.scale.Scale = original.size * (fromScale or 0.8)
+			tween(original.scale, 0.34, { Scale = original.size }, true)
+		end
+	end
+	local function count(original, value, duration, format, eased)
+		if not original then return end
+		reveal(original)
+		original.node.Text = format(0)
+		local steps = math.min(30, value)
+		for index = 1, steps do
+			later(duration * index / steps, function()
+				local fraction = index / steps
+				if eased then fraction = 1 - (1 - fraction) ^ 3 end
+				original.node.Text = format(math.floor(value * fraction + 0.5))
+			end)
+		end
+	end
+	owner.levelBarFeedback = owner.levelBarFeedback or setmetatable({}, { __mode = "k" })
+	local fill = path(frame, { "FillBar", "Fill" })
+	local previous = owner.levelBarFeedback[frame]
+	if previous and previous.animation then previous.animation:Cancel() end
+	local green = previous and previous.green or (fill and fill.BackgroundColor3)
+	if fill then
+		fill.Size, fill.BackgroundColor3 = UDim2.fromScale(math.clamp(before.xp / before.xpToNextLevel, 0.1, 1), 1), green
+		owner.levelBarFeedback[frame] = { fill = fill, level = before.level, xp = before.xp,
+			required = before.xpToNextLevel, green = green }
+	end
+	if current then current.node.Text = string.format("Level %d | %d / %d XP", before.level, before.xp, before.xpToNextLevel) end
+	local function popButtons()
+		local revision = sequence.barRevision
+		for index, button in ipairs(buttons) do
+			later((index - 1) * 0.10, function()
+				if sequence.barRevision == revision then reveal(button, 0) end
+			end)
+		end
+		later(0.35 + #buttons * 0.10, function()
+			if sequence.barRevision ~= revision then return end
+			sequence.ready = true
+			for _, original in ipairs(sequence.originals) do
+				if original.scale and original.scale.Parent then
+					if original.created then original.scale:Destroy() else original.scale.Scale = original.size end
+				end
+			end
+			for _, button in ipairs(buttons) do
+				button.node.Active, button.node.Selectable = button.active, button.selectable
+			end
+		end)
+	end
+	sequence.drawProgress = function()
+		if not valid() then return end
+		local target = progressionAt(sequence.targetTotal)
+		local feedback = owner.levelBarFeedback[frame]
+		local levelUp = feedback and (feedback.celebrating or target.level > feedback.level)
+		InterfaceController.UpdateProgressFill(owner, frame, target)
+		if current then current.node.Text = string.format("Level %d | %d / %d XP", target.level, target.xp, target.xpToNextLevel) end
+		if not sequence.ready then
+			for _, button in ipairs(buttons) do button.node.Visible = false end
+			sequence.barRevision += 1
+			local revision = sequence.barRevision
+			later(levelUp and 1.40 or 0.55, function()
+				if sequence.barRevision == revision then popButtons() end
+			end)
+		end
+	end
+	sequence.cancel = function()
+		if outcomeSequences[frame] ~= sequence then return end
+		outcomeSequences[frame] = nil
+		for _, animation in ipairs(sequence.tweens) do animation:Cancel() end
+		for _, connection in ipairs(sequence.connections) do connection:Disconnect() end
+		local feedback = owner.levelBarFeedback[frame]
+		if feedback and feedback.animation then feedback.animation:Cancel() end
+		owner.levelBarFeedback[frame] = nil
+		if fill and fill.Parent then fill.BackgroundColor3 = green end
+		for _, original in ipairs(sequence.originals) do
+			local node = original.node
+			if node.Parent then
+				node.Visible, node.Active, node.Selectable = original.visible, original.active, original.selectable
+				if original.alpha ~= nil then node.TextTransparency = original.alpha end
+				if original.scale then
+					if original.created then original.scale:Destroy()
+					elseif original.scale.Parent then original.scale.Scale = original.size end
+				end
+			end
+		end
+	end
+	table.insert(sequence.connections, frame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not frame.Visible then sequence.cancel() end
+	end))
+	table.insert(sequence.connections, frame.Destroying:Connect(sequence.cancel))
+	local found = math.max(0, math.floor(result.words or result.foundCount or 0))
+	local total = math.max(found, math.floor(result.total or result.wordCount or 0))
+	local wordDuration = math.clamp(found * 0.08, 0.45, 1.05)
+	later(0.30, function()
+		count(words, found, wordDuration, function(n) return InterfaceController.OutcomeWords(n, total, n == found and result.duration or nil) end)
+		later(wordDuration + 0.12, function()
+			count(xp, awarded, 0.80, function(n) return string.format("+%d XP", n) end, true)
+			later(0.95, function()
+				reveal(bar, 0.94)
+				reveal(current)
+				later(0.30, function() sequence.barStarted = true sequence.drawProgress() end)
+			end)
+		end)
+	end)
+end
 
-InterfaceController.Interface = Interface
+function InterfaceController.UpdateLevelBars(ui, progression)
+	progression = progression or {}
+	local currentLevel = progression.level or 1
+	local xp, requiredXp = progression.xp or 0, progression.xpToNextLevel or Experience.RequiredForLevel(currentLevel)
+	ui.levelBarFeedback = ui.levelBarFeedback or setmetatable({}, { __mode = "k" })
+	local rewardHints = progression.nextLevelRewardHints or Experience.HintsForLevel(currentLevel + 1)
+	for _, root in ipairs({ ui.home:FindFirstChild("LevelBar"), ui.game:FindFirstChild("LevelBar") }) do
+		if root then
+			local label = root:FindFirstChild("XP")
+			if label then label.Text = string.format("%d / %d XP", xp, requiredXp) end
+			local star = root:FindFirstChild("Star")
+			local level = star and (star:FindFirstChild("TextLabel") or star:FindFirstChild("Level") or star:FindFirstChildWhichIsA("TextLabel", true))
+			if not level and star then
+				level = text(star, "Level", "", UDim2.fromScale(0.18, 0.18), UDim2.fromScale(0.64, 0.64))
+				level.ZIndex = star.ZIndex + 1
+			end
+			if level then level.Text = tostring(currentLevel) end
+			local nextTitle = root:FindFirstChild("NextLevelTitle")
+			if nextTitle then
+				nextTitle.Visible = true
+				nextTitle.Text = string.format("LEVEL %d REWARD", currentLevel + 1)
+			end
+			local rewardTitle = root:FindFirstChild("NextLevelRewardTitle")
+			if rewardTitle then
+				rewardTitle.Visible = true
+				rewardTitle.Text = string.format("+%d Hint%s", rewardHints, rewardHints == 1 and "" or "s")
+			end
+			local rewardIcon = root:FindFirstChild("NextLevelRewardIcon")
+			if rewardIcon then rewardIcon.Visible = true end
+			local fill = path(root, { "FillBar", "Fill" })
+			if fill then
+				if fill.Size.X.Scale < 0.1 then
+					fill.Size = UDim2.new(0.1, 0, fill.Size.Y.Scale, fill.Size.Y.Offset)
+				end
+				updateLevelFill(ui, root, fill, star, currentLevel, xp, requiredXp)
+			end
+		end
+	end
+end
+
+InterfaceController.Path = path
 InterfaceController.Components = Components
 return InterfaceController

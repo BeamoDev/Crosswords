@@ -1,6 +1,32 @@
+local Players = game:GetService("Players")
+-- UI-only game: prevent avatar loading before any module or replication wait.
+Players.CharacterAutoLoads = false
+
+-- Safety for an already-created character or another script explicitly spawning one.
+local protectedPlayers = setmetatable({}, { __mode = "k" })
+local function protectCharacter(character)
+	local function anchorRoot(part)
+		if part.Name == "HumanoidRootPart" and part:IsA("BasePart") then
+			part.Anchored = true
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+	character.ChildAdded:Connect(anchorRoot)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if root then anchorRoot(root) end
+end
+local function protectPlayer(player)
+	if protectedPlayers[player] then return end
+	protectedPlayers[player] = true
+	player.CharacterAdded:Connect(protectCharacter)
+	if player.Character then protectCharacter(player.Character) end
+end
+Players.PlayerAdded:Connect(protectPlayer)
+for _, player in ipairs(Players:GetPlayers()) do protectPlayer(player) end
+
 local BadgeService = game:GetService("BadgeService")
 local MarketplaceService = game:GetService("MarketplaceService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local serverFolder = script.Parent
@@ -13,10 +39,10 @@ local Analytics = require(systemsFolder:WaitForChild("Analytics"))
 local Utility = require(sharedFolder:WaitForChild("utility"):WaitForChild("Utility"))
 local DataService = require(dataFolder:WaitForChild("DataService"))
 local DuelService = require(servicesFolder:WaitForChild("DuelService"))
-local ProgressionService = require(servicesFolder:WaitForChild("ProgressionService"))
+local QueueService = require(servicesFolder:WaitForChild("QueueService"))
 local RewardService = require(servicesFolder:WaitForChild("RewardService"))
 local SocialService = require(servicesFolder:WaitForChild("SocialService"))
-local Moderation = require(systemsFolder:WaitForChild("Moderation"))
+local FavouriteService = require(servicesFolder:WaitForChild("FavouriteService"))
 local Operations = require(systemsFolder:WaitForChild("Operations"))
 local NetworkContract = require(sharedFolder:WaitForChild("network"):WaitForChild("NetworkContract"))
 
@@ -35,6 +61,8 @@ local function safeStart(name, callback)
 	end
 	return ok
 end
+
+safeStart("Daytime environment", Operations.InitEnvironment)
 
 local function consumeRemoteRate(player, actionName, interval, payload)
 	if not player or player.Parent ~= Players then
@@ -79,7 +107,15 @@ local remotesFolder = getOrCreate(ReplicatedStorage, "Folder", NetworkContract.F
 local getBootstrapRemote = getOrCreate(remotesFolder, "RemoteFunction", NetworkContract.GetBootstrap)
 local trackActionRemote = getOrCreate(remotesFolder, "RemoteEvent", NetworkContract.TrackAction)
 local stateUpdatedRemote = getOrCreate(remotesFolder, "RemoteEvent", NetworkContract.StateUpdated)
+local favouritePromptRemote = getOrCreate(remotesFolder, "RemoteEvent", NetworkContract.FavouritePrompt)
+FavouriteService.Init(favouritePromptRemote, stateUpdatedRemote)
 local useHintRemote = getOrCreate(remotesFolder, "RemoteFunction", NetworkContract.UseHint)
+local tutorialAction = getOrCreate(remotesFolder, "RemoteFunction", NetworkContract.TutorialAction)
+require(script.Parent.services.TutorialService).Init(tutorialAction)
+local queueAction = getOrCreate(remotesFolder, "RemoteFunction", NetworkContract.QueueAction)
+local queueUpdated = getOrCreate(remotesFolder, "RemoteEvent", NetworkContract.QueueUpdated)
+local roundUpdated = getOrCreate(remotesFolder, "RemoteEvent", NetworkContract.RoundUpdated)
+QueueService.Init({ action = queueAction, queue = queueUpdated, round = roundUpdated, state = stateUpdatedRemote })
 
 local retiredTimedProductRemote = remotesFolder:FindFirstChild("UseTimedProduct")
 if retiredTimedProductRemote then
@@ -90,7 +126,7 @@ local sharedRemotesFolder = getOrCreate(ReplicatedStorage, "Folder", legacy.Fold
 local sharedEventsFolder = getOrCreate(sharedRemotesFolder, "Folder", legacy.Events)
 local sharedFunctionsFolder = getOrCreate(sharedRemotesFolder, "Folder", legacy.Functions)
 
-for _, retiredName in ipairs({ "GetQuestState", "ClaimQuest" }) do
+for _, retiredName in ipairs({ "GetQuestState", "ClaimQuest", "ClaimTimedReward" }) do
 	local staleRemote = sharedFunctionsFolder:FindFirstChild(retiredName)
 	if staleRemote then
 		staleRemote:Destroy()
@@ -101,17 +137,12 @@ local purchaseHintsRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction",
 local getDailyRewardStateRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", legacy.GetDailyRewardState)
 local claimDailyRewardRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", legacy.ClaimDailyReward)
 local checkHintsRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", legacy.CheckHints)
-local claimTimedRewardRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", legacy.ClaimTimedReward)
-local adminActionRemote = getOrCreate(sharedFunctionsFolder, "RemoteFunction", legacy.AdminAction)
 
-local purchaseSuccessEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.PurchaseSuccess)
 local claimGiftEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.ClaimGift)
 local playerJoinedGroupEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.PlayerJoinedGroup)
 local groupHintAwardedEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.GroupHintAwarded)
 local updateSettingEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.UpdateSetting)
 local rejoinRemote = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.Rejoin)
-local adminMessageEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.AdminMessage)
-local adminBoardResetEvent = getOrCreate(sharedEventsFolder, "RemoteEvent", legacy.AdminBoardReset)
 
 getBootstrapRemote.OnServerInvoke = function(player)
 	if not consumeRemoteRate(player, "bootstrap", 0.25) then
@@ -121,28 +152,25 @@ getBootstrapRemote.OnServerInvoke = function(player)
 end
 
 trackActionRemote.OnServerEvent:Connect(function(player, actionName, payload)
+	-- Legacy solo progression cannot award currency or mutate the new shared rounds.
+	if actionName ~= "ClientFunnel" or player:GetAttribute("ProfileReady") ~= true then return end
 	if not NetworkContract.ValidateTrackAction(actionName, payload)
 		or not NetworkContract.ConsumeRateLimit(actionRateState, player.UserId, actionName, os.clock()) then
 		return
 	end
 
-	local snapshot = ProgressionService.RecordAction(player, actionName, payload)
-	if snapshot then
-		stateUpdatedRemote:FireClient(player, snapshot)
-	end
+	Analytics.TrackCriticalStep(player, payload.step or payload.name, payload.details)
 end)
 
 useHintRemote.OnServerInvoke = function(player, payload)
 	if type(payload) ~= "table" or not consumeRemoteRate(player, "use_hint", 0.1, payload) then
 		return { success = false, accepted = false, message = "Invalid hint request." }
 	end
-	if payload.boardState ~= nil and not NetworkContract.ValidateBoardState(payload.boardState) then
-		return { success = false, accepted = false, message = "Invalid board state." }
-	end
 	if payload.word ~= nil and (type(payload.word) ~= "string" or #payload.word > NetworkContract.Limits.MaximumWordLength) then
 		return { success = false, accepted = false, message = "Invalid hint word." }
 	end
-	return ProgressionService.UseHint(player, payload)
+	if payload.mode == "Duel" then return DuelService:UseHint(player, payload.word) end
+	return { success = false, accepted = false, message = "Use the current round hint action." }
 end
 
 purchaseHintsRemote.OnServerInvoke = function(player, amount)
@@ -173,20 +201,6 @@ checkHintsRemote.OnServerInvoke = function(player)
 	return RewardService.GetAvailableHints(player)
 end
 
-claimTimedRewardRemote.OnServerInvoke = function(player)
-	if not consumeRemoteRate(player, "timed_reward_claim", 0.5) then
-		return { success = false, message = "Please wait." }
-	end
-	return RewardService.ClaimNextReward(player)
-end
-
-adminActionRemote.OnServerInvoke = function(player, payload)
-	if type(payload) ~= "table" or not consumeRemoteRate(player, "admin_action", 0.2, payload) then
-		return { success = false, allowed = false, message = "Invalid request." }
-	end
-	return Moderation.HandleMenuRequest(player, payload)
-end
-
 claimGiftEvent.OnServerEvent:Connect(function(player)
 	if not consumeRemoteRate(player, "gift_claim", 0.5) then
 		return
@@ -208,6 +222,7 @@ updateSettingEvent.OnServerEvent:Connect(function(player, settingName, value)
 		return
 	end
 	if RewardService.UpdateSetting(player, settingName, value) then
+		if settingName == "DuelInvites" then DuelService:OnInviteSettingChanged(player) end
 		stateUpdatedRemote:FireClient(player, DataService.GetSnapshot(player))
 	end
 end)
@@ -237,8 +252,9 @@ local function onPlayerAdded(player)
 		return
 	end
 	loadedPlayers[player.UserId] = true
+	FavouriteService.AddPlayer(player)
+	player.ReplicationFocus = workspace:FindFirstChild("CamPart")
 	Analytics.InitPlayer(player)
-	ProgressionService.ClearPlayer(player)
 	DataService.LoadPlayer(player)
 	RewardService.OnPlayerLoaded(player)
 	awardWelcomeBadge(player)
@@ -257,12 +273,13 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	FavouriteService.RemovePlayer(player)
 	loadedPlayers[player.UserId] = nil
 	actionRateState[player.UserId] = nil
 	remoteRateState[player.UserId] = nil
+	DuelService:OnPlayerRemoving(player)
 	Analytics.PlayerLeft(player)
 	SocialService.FlushPlayer(player)
-	ProgressionService.ClearPlayer(player)
 	DataService.ReleasePlayer(player)
 end)
 
@@ -276,11 +293,10 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 	if not result then
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
+	-- Acknowledge a paid receipt only after its grant and receipt ID are durable.
+	if not DataService.SavePlayer(player) then return Enum.ProductPurchaseDecision.NotProcessedYet end
 	if result.snapshot and result.alreadyProcessed ~= true then
 		stateUpdatedRemote:FireClient(player, result.snapshot)
-	end
-	if result.alreadyProcessed ~= true then
-		purchaseSuccessEvent:FireClient(player, result.kind, result.amount)
 	end
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
@@ -294,26 +310,15 @@ safeStart("DuelService", function()
 		StateUpdatedRemote = stateUpdatedRemote,
 	})
 end)
-safeStart("RewardService timed rewards", RewardService.StartTracking)
 safeStart("Operations", function()
 	Operations.InitAutoRejoin(rejoinRemote)
-	Operations.InitDayNight()
 end)
-safeStart("Moderation", function()
-	Moderation.Init({
-		Players = Players,
-		AnalyticsService = Analytics,
-		SocialService = SocialService,
-		MetaService = RewardService,
-		PlayerDataStore = DataService,
-		StateUpdatedRemote = stateUpdatedRemote,
-		AdminMessageEvent = adminMessageEvent,
-		AdminBoardResetEvent = adminBoardResetEvent,
-	})
-end)
-
 game:BindToClose(function()
 	closing = true
+	FavouriteService.Stop()
+	QueueService.Stop()
+	DuelService.Stop()
+	Operations.StopEnvironment()
 	DataService.StopAutosave()
 	pcall(SocialService.FlushAll)
 	pcall(DataService.SaveAll)

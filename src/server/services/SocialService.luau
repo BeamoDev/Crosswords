@@ -9,8 +9,9 @@ local LegacyRemotes = require(sharedFolder:WaitForChild("network"):WaitForChild(
 
 local DEFAULT_META_CONFIG = {
 	LEADERBOARD = {
-		SolvesStoreName = "WordSearchSolves_v1",
-		RefreshInterval = 300,
+		WordsFoundStoreName = "WordHuntQueueWordsFound_v1",
+		DuelWinsStoreName = "WordHuntQueueDuelWins_v1",
+		RefreshInterval = 120,
 		WriteInterval = 60,
 	},
 }
@@ -18,25 +19,28 @@ local DEFAULT_META_CONFIG = {
 local MetaConfig = Utility.Resolve("GameConfig", {
 	Meta = DEFAULT_META_CONFIG,
 }).Meta
-local refreshInterval = math.max(60, math.floor(tonumber(MetaConfig.LEADERBOARD.RefreshInterval) or 300))
+local refreshInterval = math.max(60, math.floor(tonumber(MetaConfig.LEADERBOARD.RefreshInterval) or 120))
 local writeInterval = math.max(30, math.floor(tonumber(MetaConfig.LEADERBOARD.WriteInterval) or 60))
 
 local leaderboardDefinitions = {
-	Solves = {
-		title = "Wins",
-		storeName = MetaConfig.LEADERBOARD.SolvesStoreName,
-		legacyUpdateEvent = LegacyRemotes.LeaderboardUpdate,
-		legacyRequestEvent = LegacyRemotes.LeaderboardRequest,
+	WordsFound = {
+		title = "Words Found",
+		storeName = MetaConfig.LEADERBOARD.WordsFoundStoreName,
 		getValueFromSnapshot = function(snapshot)
-			return (((snapshot or {}).stats or {}).boardsCleared) or 0
+			return ((snapshot or {}).progression or {}).wordsFound or 0
 		end,
-		getLiveValue = function(player)
-			local leaderstats = player:FindFirstChild("leaderstats")
-			local winsValue = leaderstats and leaderstats:FindFirstChild("Wins") or nil
-			return tonumber(winsValue and winsValue.Value) or 0
+	},
+	["1v1Wins"] = {
+		title = "1v1 Wins",
+		storeName = MetaConfig.LEADERBOARD.DuelWinsStoreName,
+		getValueFromSnapshot = function(snapshot)
+			return (((snapshot or {}).progression or {}).duel or {}).wins or 0
 		end,
 	},
 }
+local liveSnapshots = {}
+local identities = {}
+local inFlight = {}
 
 local orderedStores = {}
 local pendingWrites = {}
@@ -54,6 +58,8 @@ local function getEventsFolder()
 end
 
 local function resolvePlayerDisplay(userId)
+	local cached = identities[userId]
+	if cached and os.time() - cached.at < 600 then return cached.username, cached.thumbnail end
 	local username = "Unknown"
 	local thumbnail = ""
 
@@ -61,9 +67,13 @@ local function resolvePlayerDisplay(userId)
 		username = Players:GetNameFromUserIdAsync(userId)
 	end)
 	pcall(function()
-		thumbnail = Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+		local image, ready = Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+		if ready then thumbnail = image end
 	end)
 
+	if username ~= "Unknown" and thumbnail ~= "" then
+		identities[userId] = { username = username, thumbnail = thumbnail, at = os.time() }
+	end
 	return username, thumbnail
 end
 
@@ -72,11 +82,11 @@ local function sortAndRankEntries(entries)
 		if (a.Score or 0) ~= (b.Score or 0) then
 			return (a.Score or 0) > (b.Score or 0)
 		end
-		return tostring(a.Username or "") < tostring(b.Username or "")
+		return a.UserId < b.UserId
 	end)
 
 	local ranked = {}
-	for index = 1, math.min(10, #entries) do
+	for index = 1, math.min(3, #entries) do
 		local entry = entries[index]
 		entry.Rank = index
 		table.insert(ranked, entry)
@@ -132,11 +142,11 @@ local function mergeEntries(storedEntries, liveEntries)
 end
 
 local function getDefinition(categoryKey)
-	return leaderboardDefinitions[categoryKey or "Solves"]
+	return leaderboardDefinitions[categoryKey or "WordsFound"]
 end
 
 local function getCacheState(categoryKey)
-	categoryKey = categoryKey or "Solves"
+	categoryKey = categoryKey or "WordsFound"
 	local cache = caches[categoryKey]
 	if cache then
 		return cache
@@ -151,7 +161,7 @@ local function getCacheState(categoryKey)
 end
 
 local function getPendingBucket(categoryKey)
-	categoryKey = categoryKey or "Solves"
+	categoryKey = categoryKey or "WordsFound"
 	local bucket = pendingWrites[categoryKey]
 	if bucket then
 		return bucket
@@ -163,7 +173,7 @@ local function getPendingBucket(categoryKey)
 end
 
 local function getStore(categoryKey)
-	categoryKey = categoryKey or "Solves"
+	categoryKey = categoryKey or "WordsFound"
 	local store = orderedStores[categoryKey]
 	if store then
 		return store
@@ -187,11 +197,11 @@ local function getLiveEntries(categoryKey)
 
 	local entries = {}
 	for _, player in ipairs(Players:GetPlayers()) do
-		local score = math.max(0, math.floor(tonumber(definition.getLiveValue(player)) or 0))
-		if score > 0 then
+		local score = math.max(0, math.floor(tonumber(definition.getValueFromSnapshot(liveSnapshots[player.UserId])) or 0))
+		if score > 0 and player.UserId > 0 then
 			table.insert(entries, {
 				UserId = player.UserId,
-				Username = player.DisplayName ~= "" and player.DisplayName or player.Name,
+				Username = player.Name,
 				Thumbnail = "",
 				Score = score,
 			})
@@ -208,8 +218,8 @@ local function broadcastCategory(categoryKey)
 		return
 	end
 
-	if categoryKey == "Solves" and legacyUpdateEvent then
-		legacyUpdateEvent:FireAllClients(cache.entries, cache.updatedAt)
+	if legacyUpdateEvent then
+		legacyUpdateEvent:FireAllClients(categoryKey, cache.entries, cache.updatedAt, cache.revision or 0)
 	end
 
 end
@@ -220,17 +230,19 @@ local function refreshCategory(categoryKey)
 		return {}, 0, ""
 	end
 
+	local cache = getCacheState(categoryKey)
+	if cache.refreshing then return cache.entries, cache.updatedAt, definition.title end
+	cache.refreshing = true
 	local entries = {}
-	local store = getStore(categoryKey)
-	local ok, pages = pcall(function()
-		return store:GetSortedAsync(false, 10)
+	local ok, page = pcall(function()
+		return getStore(categoryKey):GetSortedAsync(false, 3):GetCurrentPage()
 	end)
 
-	if ok and pages then
-		for _, item in ipairs(pages:GetCurrentPage()) do
+	if ok and page then
+		for _, item in ipairs(page) do
 			local userId = tonumber(item.key)
-			if userId then
-				local username, thumbnail = resolvePlayerDisplay(userId)
+			if userId and userId > 0 and (tonumber(item.value) or 0) > 0 then
+				local username, thumbnail = nil, ""
 				table.insert(entries, {
 					UserId = userId,
 					Username = username,
@@ -240,29 +252,24 @@ local function refreshCategory(categoryKey)
 			end
 		end
 	else
-		warn("[SocialService] Failed to refresh leaderboard", categoryKey, tostring(pages))
+		warn("[SocialService] Failed to refresh leaderboard", categoryKey, tostring(page))
+		entries = cache.entries
 	end
 
-	local cache = getCacheState(categoryKey)
 	cache.entries = mergeEntries(entries, getLiveEntries(categoryKey))
-	cache.updatedAt = os.time()
+	for _, entry in ipairs(cache.entries) do
+		entry.Username, entry.Thumbnail = resolvePlayerDisplay(entry.UserId)
+	end
+	if ok then cache.updatedAt = os.time() end
+	cache.revision = (cache.revision or 0) + 1
+	cache.refreshing = false
 	broadcastCategory(categoryKey)
 	return cache.entries, cache.updatedAt, definition.title
 end
 
-local function maybeMergeLiveEntries(categoryKey)
-	local cache = getCacheState(categoryKey)
-	local liveEntries = getLiveEntries(categoryKey)
-	if #cache.entries == 0 then
-		cache.entries = mergeEntries(nil, liveEntries)
-		broadcastCategory(categoryKey)
-	elseif #liveEntries > 0 then
-		cache.entries = mergeEntries(cache.entries, liveEntries)
-	end
-end
-
 function SocialService.Refresh()
-	return refreshCategory("Solves")
+	SocialService.FlushAll()
+	for categoryKey in pairs(leaderboardDefinitions) do refreshCategory(categoryKey) end
 end
 
 function SocialService.RefreshCategory(categoryKey)
@@ -270,73 +277,62 @@ function SocialService.RefreshCategory(categoryKey)
 end
 
 function SocialService.GetCache()
-	return SocialService.GetCategoryCache("Solves")
+	return SocialService.GetCategoryCache("WordsFound")
 end
 
 function SocialService.GetCategoryCache(categoryKey)
-	categoryKey = categoryKey or "Solves"
-	local cache = getCacheState(categoryKey)
 	local definition = getDefinition(categoryKey)
-	if not definition then
-		return {}, 0, ""
-	end
-
-	if os.time() - (cache.updatedAt or 0) >= refreshInterval then
-		return refreshCategory(categoryKey)
-	end
-
-	maybeMergeLiveEntries(categoryKey)
-	return cache.entries, cache.updatedAt, definition.title
-end
-
-function SocialService.MarkDirty(player, solves)
-	if not player then
-		return
-	end
-
-	local value = math.max(0, math.floor(tonumber(solves) or 0))
-	if value > 0 then
-		getPendingBucket("Solves")[player.UserId] = value
-	end
+	if not definition then return {}, 0, "" end
+	local cache = getCacheState(categoryKey)
+	-- Client requests use cached data and never trigger global DataStore reads.
+	return mergeEntries(cache.entries, getLiveEntries(categoryKey)), cache.updatedAt, definition.title
 end
 
 function SocialService.MarkSnapshotDirty(player, snapshot)
-	if not player or type(snapshot) ~= "table" then
+	if not player or player.UserId <= 0 or player:GetAttribute("ProfileReady") ~= true or type(snapshot) ~= "table" then
 		return
 	end
 
+	liveSnapshots[player.UserId] = snapshot
 	for categoryKey, definition in pairs(leaderboardDefinitions) do
 		local value = math.max(0, math.floor(tonumber(definition.getValueFromSnapshot(snapshot)) or 0))
 		if value > 0 then
-			getPendingBucket(categoryKey)[player.UserId] = value
+			local bucket = getPendingBucket(categoryKey)
+			bucket[player.UserId] = math.max(bucket[player.UserId] or 0, value)
 		end
 	end
+end
+
+local function flushEntry(categoryKey, userId)
+	local bucket = getPendingBucket(categoryKey)
+	local value = bucket[userId]
+	local key = categoryKey .. ":" .. tostring(userId)
+	if value == nil or inFlight[key] then return end
+	inFlight[key] = true
+	bucket[userId] = nil
+	local ok, err = pcall(function()
+		getStore(categoryKey):UpdateAsync(tostring(userId), function(previous)
+			return math.max(tonumber(previous) or 0, value)
+		end)
+	end)
+	if not ok then
+		bucket[userId] = math.max(bucket[userId] or 0, value)
+		warn("[SocialService] Failed to flush leaderboard entry", categoryKey, userId, err)
+	end
+	inFlight[key] = nil
 end
 
 function SocialService.FlushPlayer(player)
-	if not player then
-		return
-	end
-
-	for categoryKey in pairs(leaderboardDefinitions) do
-		local bucket = getPendingBucket(categoryKey)
-		local value = bucket[player.UserId]
-		if value ~= nil then
-			bucket[player.UserId] = nil
-			local ok, err = pcall(function()
-				getStore(categoryKey):SetAsync(tostring(player.UserId), value)
-			end)
-			if not ok then
-				warn("[SocialService] Failed to flush leaderboard entry", categoryKey, player.Name, err)
-				bucket[player.UserId] = value
-			end
-		end
-	end
+	if not player then return end
+	for categoryKey in pairs(leaderboardDefinitions) do flushEntry(categoryKey, player.UserId) end
 end
 
 function SocialService.FlushAll()
-	for _, player in ipairs(Players:GetPlayers()) do
-		SocialService.FlushPlayer(player)
+	-- Retry failed writes even after their player has disconnected.
+	for categoryKey in pairs(leaderboardDefinitions) do
+		local ids = {}
+		for userId in pairs(getPendingBucket(categoryKey)) do table.insert(ids, userId) end
+		for _, userId in ipairs(ids) do flushEntry(categoryKey, userId) end
 	end
 end
 
@@ -358,12 +354,17 @@ function SocialService.Initialize()
 			return
 		end
 		requestTimes[player.UserId] = now
-		local entries, updatedAt = SocialService.GetCategoryCache("Solves")
-		legacyUpdateEvent:FireClient(player, entries, updatedAt)
+		for categoryKey in pairs(leaderboardDefinitions) do
+			local entries, updatedAt = SocialService.GetCategoryCache(categoryKey)
+			local cache = getCacheState(categoryKey)
+			cache.revision = (cache.revision or 0) + 1
+			legacyUpdateEvent:FireClient(player, categoryKey, entries, updatedAt, cache.revision)
+		end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
 		requestTimes[player.UserId] = nil
+		liveSnapshots[player.UserId] = nil
 	end)
 
 	task.spawn(function()
@@ -376,9 +377,7 @@ function SocialService.Initialize()
 	task.spawn(function()
 		while true do
 			task.wait(refreshInterval)
-			for categoryKey in pairs(leaderboardDefinitions) do
-				refreshCategory(categoryKey)
-			end
+			SocialService.Refresh()
 		end
 	end)
 

@@ -192,38 +192,88 @@ function Operations.InitAutoRejoin(rejoinRemote)
 end
 
 
--- Shared environment cycle ownership.
+-- Shared daytime environment and camera anchor ownership.
 local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local dayNightInitialized = false
+local CAMERA_CFRAME = CFrame.new(-225.271, 136.93, -519.269)
+	* CFrame.fromOrientation(math.rad(15.309), math.rad(40.884), 0)
+local TRANSITION_SECONDS = 180
+local UPDATE_SECONDS = 0.25
+local DAYLIGHT = {
+	{ hour = 12.25, cover = 0.28, density = 0.32, brightness = 2.5,
+		ambient = Color3.fromRGB(142, 155, 171), outdoor = Color3.fromRGB(177, 190, 207), clouds = Color3.fromRGB(250, 253, 255) },
+	{ hour = 13.5, cover = 0.58, density = 0.48, brightness = 2.15,
+		ambient = Color3.fromRGB(147, 156, 170), outdoor = Color3.fromRGB(179, 190, 203), clouds = Color3.fromRGB(241, 247, 255) },
+	{ hour = 15.5, cover = 0.38, density = 0.38, brightness = 2.35,
+		ambient = Color3.fromRGB(157, 150, 144), outdoor = Color3.fromRGB(204, 194, 180), clouds = Color3.fromRGB(255, 249, 237) },
+	{ hour = 11, cover = 0.44, density = 0.42, brightness = 2.4,
+		ambient = Color3.fromRGB(144, 158, 175), outdoor = Color3.fromRGB(179, 197, 216), clouds = Color3.fromRGB(248, 252, 255) },
+}
+local environmentConnection, cameraPart
 
-local DAY_CLOCK_TIME = 14.5
-local NIGHT_CLOCK_TIME = 0
-local DAY_HOLD_SECONDS = 300
-local NIGHT_HOLD_SECONDS = 150
-
-local function holdClockTime(clockTime, duration)
-	Lighting.ClockTime = clockTime
-	task.wait(duration)
+local function blend(a, b, alpha)
+	return a + (b - a) * alpha
 end
 
-function Operations.InitDayNight()
-	if dayNightInitialized then
-		return
+local function applyDaylight(clouds, from, to, alpha)
+	local eased = (1 - math.cos(alpha * math.pi)) * 0.5
+	-- TimeOfDay replicates to clients; all endpoints remain between 11:00 and 15:30.
+	local seconds = math.floor(math.clamp(blend(from.hour, to.hour, eased), 11, 15.5) * 3600)
+	Lighting.TimeOfDay = string.format("%02d:%02d:%02d", math.floor(seconds / 3600), math.floor(seconds / 60) % 60, seconds % 60)
+	Lighting.Brightness = blend(from.brightness, to.brightness, eased)
+	Lighting.Ambient = from.ambient:Lerp(to.ambient, eased)
+	Lighting.OutdoorAmbient = from.outdoor:Lerp(to.outdoor, eased)
+	clouds.Cover = blend(from.cover, to.cover, eased)
+	clouds.Density = blend(from.density, to.density, eased)
+	clouds.Color = from.clouds:Lerp(to.clouds, eased)
+end
+
+function Operations.InitEnvironment()
+	if environmentConnection then return cameraPart end
+	cameraPart = Workspace:FindFirstChild("CamPart")
+	if not cameraPart or not cameraPart:IsA("BasePart") then
+		cameraPart = Instance.new("Part")
+		cameraPart.Name = "CamPart"
 	end
+	cameraPart.Anchored = true
+	cameraPart.CanCollide, cameraPart.CanTouch, cameraPart.CanQuery = false, false, false
+	cameraPart.CastShadow, cameraPart.Transparency = false, 1
+	cameraPart.Size = Vector3.new(1, 1, 1)
+	cameraPart.CFrame = CAMERA_CFRAME
+	cameraPart.Parent = Workspace
+	-- The pose remains available even when StreamingEnabled unloads the distant part.
+	ReplicatedStorage:SetAttribute("CamPartCFrame", cameraPart.CFrame)
 
-	dayNightInitialized = true
-	Lighting.ClockTime = DAY_CLOCK_TIME
-
-	task.spawn(function()
-		while true do
-			holdClockTime(DAY_CLOCK_TIME, DAY_HOLD_SECONDS)
-			Lighting.ClockTime = NIGHT_CLOCK_TIME
-			holdClockTime(NIGHT_CLOCK_TIME, NIGHT_HOLD_SECONDS)
-			Lighting.ClockTime = DAY_CLOCK_TIME
-		end
+	local terrain = Workspace.Terrain
+	local clouds = terrain:FindFirstChildOfClass("Clouds")
+	if not clouds then
+		clouds = Instance.new("Clouds")
+		clouds.Name = "Clouds"
+		clouds.Parent = terrain
+	end
+	clouds.Enabled = true
+	Lighting.GeographicLatitude = 35
+	local index, elapsed, sinceUpdate = 1, 0, 0
+	applyDaylight(clouds, DAYLIGHT[1], DAYLIGHT[2], 0)
+	environmentConnection = RunService.Heartbeat:Connect(function(dt)
+		elapsed += dt
+		sinceUpdate += dt
+		if sinceUpdate < UPDATE_SECONDS then return end
+		sinceUpdate %= UPDATE_SECONDS
+		local steps = math.floor(elapsed / TRANSITION_SECONDS)
+		index = (index - 1 + steps) % #DAYLIGHT + 1
+		elapsed %= TRANSITION_SECONDS
+		applyDaylight(clouds, DAYLIGHT[index], DAYLIGHT[index % #DAYLIGHT + 1], elapsed / TRANSITION_SECONDS)
 	end)
+	return cameraPart
 end
 
+function Operations.StopEnvironment()
+	if environmentConnection then environmentConnection:Disconnect() end
+	environmentConnection = nil
+end
 
 return Operations

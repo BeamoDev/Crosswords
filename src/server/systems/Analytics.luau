@@ -84,9 +84,9 @@ local function getCurrencyBalance(player: Player, currency: string): number
 	local normalized = string.lower(currency)
 	if type(mutableData) == "table" then
 		if normalized == "hints" then
-			return math.max(0, math.floor((mutableData.resources and mutableData.resources.hintsAvailable) or 0))
+			return math.max(0, math.floor(mutableData.hints or 0))
 		elseif normalized == "pieces" or normalized == "puzzle_pieces" then
-			return math.max(0, math.floor((mutableData.resources and mutableData.resources.puzzlePieces) or 0))
+			return math.max(0, math.floor(mutableData.puzzlePieces or 0))
 		end
 		return 0
 	end

@@ -11,13 +11,15 @@ Meta.DEFAULTS = {
 	Settings = {
 		SFX = true,
 		Music = true,
+		DuelInvites = true,
 	},
 }
 
 Meta.HINT_PRODUCT_IDS = {
 	[1] = 3573028208,
 	[5] = 3573028342,
-	[25] = 3573028459,
+	[15] = 3573028459,
+	[30] = 3711566945,
 }
 
 Meta.DAILY_REWARD = {
@@ -33,8 +35,9 @@ Meta.GIFT = {
 }
 
 Meta.LEADERBOARD = {
-	SolvesStoreName = "WordSearchSolves_v1",
-	RefreshInterval = 300,
+	WordsFoundStoreName = "WordHuntQueueWordsFound_v1",
+	DuelWinsStoreName = "WordHuntQueueDuelWins_v1",
+	RefreshInterval = 120,
 	WriteInterval = 60,
 }
 
@@ -48,15 +51,12 @@ Economy.HintPackPieceCosts = {
 }
 
 Economy.ModeMultipliers = {
-	classic = 1.0,
-	themed = 1.1,
-	freeplay = 1.15,
-	backwards = 1.2,
-	fog = 1.3,
-	onelife = 1.38,
-	mega = 1.92,
-	daily = 2.15,
+	standard = 1.1,
+	mini = 1.0,
+	jumbo = 1.92,
+	hardcore = 1.38,
 	duel = 1.0,
+	timed = 1.0,
 }
 
 Economy.CleanHintBonus = 2
@@ -151,4 +151,10 @@ end
 return {
 	Meta = Meta,
 	Economy = Economy,
+	Bots = { Enabled = true, ServerSize = 12, MinBots = 2 },
+	Tutorial = {
+		-- Everyone respects saved completion/Skip except this owner testing account.
+		ReplayEveryJoin = false,
+		ReplayUserId = 1790165114,
+	},
 }
