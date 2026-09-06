@@ -6,7 +6,7 @@ These instructions apply to the entire repository.
 
 - The user explicitly selected the current `src/` tree as the source to change.
 - This checkout is the 150-board Word Hunt implementation, not the unfinished 1,000-level modular revamp previously described here.
-- `README.md` and `src/REVAMP_HANDOFF.md` still describe that different revamp and are historical references only. Do not use them to infer current files, remotes, persistence, modes, UI, or release state.
+- `README.md` and `ARCHITECTURE.md` describe the consolidated current source. Keep them synchronized with structural or ownership changes.
 - Make repository changes only unless the user explicitly asks for Roblox Studio synchronization or publishing. Never claim a source edit has been tested in Studio or in the published place without direct evidence.
 - Preserve unrelated dirty-worktree changes and Studio-authored assets that are not represented in this repository.
 
@@ -14,28 +14,28 @@ These instructions apply to the entire repository.
 
 - This checkout has no Rojo project. Do not introduce Rojo, Wally, Rokit, generated places, or dependency lock files unless the workflow is intentionally changed.
 - Preserve exact folder names and casing. Shared imports expect lowercase `ReplicatedStorage.shared`.
-- `GameController.local.luau` currently refuses to run when it is a descendant of `StarterPlayerScripts`. Do not relocate the active LocalScript or guess the live hierarchy without inspecting the synchronized Studio place.
+- `ClientBootstrap.local.luau` is the sole client executable and `controllers/GameController.luau` retains the current StarterPlayerScripts descendant guard. Do not guess or change the live script placement without inspecting the synchronized Studio place.
 - The client chooses `ReplicatedStorage.Interfaces.Desktop` or `Mobile`, clones it to `PlayerGui.HUD`, and then binds the authored hierarchy. Do not add a second HUD.
-- Keep exactly one active `GameController` LocalScript and one `ServerBootstrap` Script.
+- Keep exactly one active `ClientBootstrap` LocalScript and one `ServerBootstrap` Script.
 - The server creates `ReplicatedStorage.WordSearchBackendRemotes` plus the legacy-compatible `ReplicatedStorage.Remotes.Events` and `Functions` endpoints.
 
 ## Current architecture
 
-- `src/client/GameController.local.luau`: client entrypoint, shared state, modes, remote bootstrap, view flow, audio, and controller composition.
-- `src/client/gameplay/BoardRuntime.luau`: deterministic local board rendering, selection input, hints, animations, resume flow, scoring preview, completion, and Duel presentation.
-- `src/client/gameplay/ClassicLevels.luau`: Classic level selector state and rendering helpers.
-- `src/client/ui/`: bindings for the authored Desktop/Mobile HUD, menus, summaries, meta screens, playtime rewards, and Duel UI.
-- `src/client/input/InputBindings.luau`: mouse, touch, and gamepad drag lifecycle.
-- `src/server/bootstrap/ServerBootstrap.server.luau`: server entrypoint, remotes, receipts, lifecycle, and service wiring.
-- `src/server/services/gameplay/BoardValidationService.luau`: regenerates boards server-side and validates word paths, hints, resumable state, and clears.
-- `src/server/services/gameplay/ProgressionService.luau`: applies validated words, outcomes, stars, puzzle-piece rewards, and progression.
-- `src/server/services/gameplay/DuelService.luau`: matchmaking and competitive race lifecycle.
-- `src/server/data/PlayerDataStore.luau`: sole persistent-data owner, normalization, snapshots, session ownership, and saving.
-- `src/server/services/meta/`: hints, daily/group/gift rewards, playtime rewards, and leaderboards.
-- `src/shared/content/Levels.luau`: deterministic 150-board Classic catalog generated across six difficulty packs.
-- `src/shared/board/`: shared definition and board generation used independently by client and server.
-- `src/shared/progression/StarRules.luau`: durable per-board star-slot resolution and hint-based star awards.
-- `src/shared/config/`: remote names, hint products, puzzle-piece economy, and playtime-reward configuration.
+- The source contains exactly 35 runtime Luau modules (13 client, 11 server, and 11 shared) plus one pure puzzle test module.
+- `src/client/ClientBootstrap.local.luau`: sole client entrypoint.
+- `src/client/controllers/`: game composition, board presentation, progression presentation, and authored-interface binding/components.
+- `src/client/features/`: Duel, reward/result, social/group-intro/idle-rejoin, and admin flows.
+- `src/client/systems/`: cross-mode input, camera, audio, and device/orientation behavior.
+- `src/server/ServerBootstrap.server.luau`: sole server entrypoint, remotes, receipts, lifecycle, and service wiring.
+- `src/server/services/GameService.luau`: canonical puzzle regeneration and word/hint/clear validation.
+- `src/server/services/ProgressionService.luau`: accepted puzzle actions, stars, puzzle pieces, and unlocks.
+- `src/server/services/RewardService.luau`: hints, Daily/group/gift/playtime rewards, settings, purchases, and receipt grants.
+- `src/server/services/DuelService.luau` and `SocialService.luau`: competitive and leaderboard ownership.
+- `src/server/data/`: the sole persistent-data/session owner plus profile schema, defaults, and normalization.
+- `src/server/systems/`: analytics, moderation/admin, protected webhook, idle-rejoin, and environment operations.
+- `src/shared/config/`, `content/`, `network/`, `puzzle/`, and `utility/`: configuration, 150-board content, remote contracts, generation, pure helpers, validation, and common utilities.
+- `src/shared/ui/UIEffects.luau`: the single UI-effects implementation. Keep this replicated path because the Studio-authored `PlayerGui.HUD.FX` LocalScript requires `ReplicatedStorage.shared.ui.UIEffects` directly.
+- `src/shared/puzzle/PuzzleTests.spec.luau`: opt-in pure shared contract tests; it is not a runtime entrypoint.
 
 ## Normal-puzzle timer policy
 
@@ -58,7 +58,7 @@ These instructions apply to the entire repository.
 ## Persistence and receipts
 
 - Production persistence uses `WordSearchData_v1`, keyed as `player_<UserId>`; the current data version is 11.
-- `PlayerDataStore` alone owns load, normalization, snapshots, session tokens, saves, releases, and player data mirrors.
+- `DataService` alone owns load, normalization, snapshots, session tokens, saves, releases, and player data mirrors.
 - When changing saved data, update defaults, normalization/migration, snapshots, mirrors, and all readers together.
 - Preserve processed-receipt idempotency. Unknown Developer Product receipts must remain retryable; supported hint products and retired-product conversions must mark a receipt only after applying the grant.
 - Do not read, overwrite, delete, or migrate production data outside the explicit migration code without the user's approval.

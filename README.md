@@ -1,71 +1,61 @@
 # Word Hunt
 
-Word Hunt is a Roblox puzzle game with fresh server-generated boards and a fully scripted, cross-device interface. The internal `WordSearchRevamp` names remain unchanged so existing remotes and saved data stay compatible. The client renders the board and handles input, while the server owns puzzle paths, round validation, progression, rewards, and saved data.
+Word Hunt is a Roblox word-search game with a 150-board Classic path plus Themed, Freeplay, Backwards, Fog, OneLife, Mega, Daily, and Duel modes. The client presents authored Desktop/Mobile interfaces and responsive board input; the server independently validates puzzle actions and owns rewards, progression, persistence, receipts, Daily claims, and Duel results.
 
-The current revamp supports:
+## Current gameplay rules
 
-- 1,000 Classic levels across Animals, Food, Nature, Roblox, Space, and Expert chapters
-- Quick Play and a pinned UTC Daily word-list rotation with a fresh grid
-- Mouse, touch, keyboard, and gamepad board selection
-- Stars, XP ranks, coins, hints, achievements, and daily streaks
-- A responsive white-glass HUD over a softly blurred menu sky, with a global navigation drawer and a clean open-letter board with persistent colored word trails
-- A short replayable, interactive tutorial for mouse, touch, keyboard, and controller
-- A paginated chapter browser that keeps only 30–48 of the 1,000 level buttons live at once
-- Continue, Daily, pause/restart, result/best-time, achievement, purchase-confirmation, toast, and error flows built from one shared UI system
-- Reduced motion, high contrast, and colorblind settings
-- Server-backed achievement, shop, daily-reward, purchase, and cosmetic-equipping screens
-- Confirmed hint spending plus live equipped themes, word-trail palettes, menu backgrounds, and board styles
+- Normal puzzles are untimed. Solve duration never causes a loss or changes stars, score, or puzzle-piece rewards.
+- A completed normal board awards 3 stars with no hints, 2 stars with one hint, and 1 star with two or more hints.
+- Classic Board 1 is the onboarding board: a 4x4 grid containing only the two target words `CAT` and `DOG`, placed eastward.
+- Daily reset and session playtime-reward countdowns are meta schedules, not puzzle deadlines.
+- Duel may record race duration because both players compete on the same puzzle.
 
-Zen mode is supported by the server contract but is not exposed on the main menu. Time Attack is not implemented.
+## Source layout
 
-## Repository layout
-
-All game source is stored under `src/`:
-
-- `src/client/GameController.local.luau` - client entrypoint and view/remote orchestration
-- `src/client/ui/` - the modular UI application, screens, reusable components, navigation, modals, notifications, responsive layout, theme, and image-asset registry
-- `src/client/revamp/` - retained non-visual input, animation, audio, and environment controllers
-- `src/server/bootstrap/ServerBootstrap.server.luau` - server entrypoint and remote wiring
-- `src/server/content/` - the private level catalog and authored word paths
-- `src/server/puzzle/` - deterministic board generation and validation
-- `src/server/data/` - persistent profiles, leases, normalization, and economy mutations
-- `src/server/services/` - authoritative round, reward, daily, economy, and rate-limit services
-- `src/server/tests/PuzzleEngineTests.luau` - content, generator, validator, remote, and economy tests
-- `src/shared/` - replicated configuration and shared types
-- `src/REVAMP_HANDOFF.md` - detailed architecture, datastore, content, and Studio release notes
-
-## Development workflow
-
-This checkout contains source rather than a Rojo project. Sync or copy the folders into the existing Roblox place with this runtime hierarchy:
+The implementation is consolidated into 35 runtime Luau modules—13 client, 11 server, and 11 shared—plus one pure puzzle test module.
 
 ```text
-ReplicatedStorage
-  shared
-ServerScriptService
-  server
-StarterPlayer
-  StarterPlayerScripts
-    client
+src/
+  client/
+    ClientBootstrap.local.luau
+    controllers/        GameController, BoardController, ProgressionController, InterfaceController
+    features/           Duels, Rewards, Social, Admin
+    systems/            Input, Camera, Audio, Device
+  server/
+    ServerBootstrap.server.luau
+    services/           GameService, ProgressionService, DuelService, RewardService, SocialService
+    data/               DataService, DataSchema
+    systems/            Analytics, Moderation, Operations
+  shared/
+    config/             GameConfig, ProgressionConfig
+    content/            PuzzleCatalog, WordBank
+    network/            NetworkContract
+    puzzle/             PuzzleEngine, PuzzleGenerator, PuzzleTypes, PuzzleValidator, PuzzleTests.spec
+    ui/                 UIEffects (required by the authored HUD FX LocalScript)
+    utility/            Utility
 ```
 
-The lowercase `ReplicatedStorage.shared` name and the nested folder names are required by the runtime imports. Keep exactly one active `client/GameController` LocalScript and one `server/bootstrap/ServerBootstrap` Script.
+`ClientBootstrap.local.luau` and `ServerBootstrap.server.luau` are the only executable entrypoints. The other files are ModuleScripts. See `ARCHITECTURE.md` for ownership, dependencies, remotes, persistence, and deployment notes.
 
-The server creates `ReplicatedStorage.WordSearchRevampRemotes`. The client builds `WordSearchUI` at runtime, so a legacy authored HUD or the retired `WordSearchRevampHUD` should not run alongside it. Existing sounds may be reused from `SoundService/SFX` and `SoundService/Music`; explicit image and sound IDs remain configurable placeholders in `src/shared/config/GameConfig.luau`.
+## Security and persistence
 
-## Validation
+- `DataService` is the only owner of saved player data and the in-server session cache.
+- Production persistence remains `WordSearchData_v1`, key prefix `player_`, data version 11.
+- The server regenerates expected puzzles and validates submitted words and exact paths. Client-reported rewards, stars, clears, progression, or receipt outcomes are never trusted.
+- `NetworkContract` bounds remote payload depth, size, word/path lengths, allowed actions, board modes, and per-action rates.
+- Developer Product receipt grants remain idempotent. Retired timer products are compatibility-only and settle as hints; no client flow sells or consumes puzzle time.
+- Webhook URLs must remain private ServerStorage configuration and must never be committed.
 
-In Roblox Studio, the server bootstrap automatically runs the puzzle suite. It can also be invoked manually:
+## Development boundary
 
-```luau
-require(game.ServerScriptService.server.tests.PuzzleEngineTests).Run()
+This repository has no Rojo project and does not contain every Studio-authored interface or world instance. Preserve lowercase `ReplicatedStorage.shared`, the existing authored `ReplicatedStorage.Interfaces` hierarchy, and the legacy-compatible remote names when synchronizing source.
+
+Local checks can verify text, imports, configuration invariants, and repository hygiene. They cannot prove Studio hierarchy, ModuleScript/LocalScript placement, authored UI compatibility, Roblox service behavior, DataStores, assets, device layout, or published-game behavior. Run those checks in Roblox Studio before release, but do not describe them as completed unless they were actually performed.
+
+The pure shared contract suite can run without Studio when Lune is available:
+
+```powershell
+lune run src/shared/puzzle/PuzzleTests.spec.luau
 ```
 
-Before publishing, test with at least two Studio clients and cover the full first-time tutorial, desktop, phone/tablet emulation, gamepad navigation, drawer close paths, round replay, Daily rollover, pause/hints, shop purchases/equips, settings, DataStore failure, menu-to-game camera restoration, and shutdown saving. Source inspection cannot verify Studio-authored hierarchy, assets, live DataStores, or published-service behavior.
-
-## Persistence and security
-
-Production data uses `WordSearchRevamp_v1`, schema version 1, with leased sessions, `UpdateAsync` retries, autosave, player-removal release, and bounded shutdown saving. Studio uses memory-only profiles and does not read or overwrite production data.
-
-Canonical paths never replicate to clients. Selection geometry, active round identity, unlocks, hint spending, completion, rewards, and economy changes are validated server-side. Do not move these decisions to the client, commit credentials, or enable placeholder Developer Product entries without real IDs and receipt handling.
-
-Read `AGENTS.md` and `src/REVAMP_HANDOFF.md` before changing gameplay, persistence, remotes, UI structure, or level content.
+It covers deterministic generation, Board 1, definition/path validation, completion, scoring, Daily identity, hint-based stars, timed-reward configuration, remote payload bounds, and action throttling.
