@@ -1220,7 +1220,8 @@ end
 
 function ProgressionController:updateShopTexts(snapshot)
 	local hints = snapshot and snapshot.hints or getIntValue(getDataFolders().data, "Hints", 0)
-	local ownsHints = (tonumber(hints) or 0) >= 1
+	hints = math.max(0, math.floor(tonumber(hints) or 0))
+	local ownsHints = hints >= 1
 	local color = ownsHints and Color3.fromRGB(43, 225, 58) or Color3.fromRGB(3, 36, 66)
 	local transparency = ownsHints and 0 or 0.5
 	local bulb, owned = self.elements.shopBulb, self.elements.shopHintsOwned
@@ -1228,6 +1229,7 @@ function ProgressionController:updateShopTexts(snapshot)
 		bulb.ImageColor3, bulb.ImageTransparency = color, transparency
 	end
 	if owned and (owned:IsA("TextLabel") or owned:IsA("TextButton")) then
+		owned.Text = tostring(hints)
 		owned.TextColor3, owned.TextTransparency = color, transparency
 	end
 	setText(self.elements.shopTitleDisplay, "Hint Shop")
@@ -1439,6 +1441,9 @@ function ProgressionController:renderLeaderboard()
 		setVisible(panel, category == self.leaderboardCategory)
 		local entries = self.leaderboardEntries[category] or {}
 		local container = panel:FindFirstChild("Container")
+		-- Bottom is authored list padding, not a disposable leaderboard entry.
+		local bottom = container and container:FindFirstChild("Bottom")
+		if bottom and bottom:IsA("GuiObject") then bottom.LayoutOrder = math.max(21, bottom.LayoutOrder) end
 		if container and container:IsA("ScrollingFrame") then
 			container.AutomaticCanvasSize = Enum.AutomaticSize.Y
 			local layout = container:FindFirstChildOfClass("UIListLayout")

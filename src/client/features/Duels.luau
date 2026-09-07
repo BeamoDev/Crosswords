@@ -328,7 +328,8 @@ function Duels:renderLobby(playerData)
 		local request = findButtonLike(entry:FindFirstChild("Request"))
 		if request then
 			local enabled = self:canRequest(entryData) == true
-			request.Visible, request.Active, request.Selectable = enabled, enabled, enabled
+			request.Visible = entryData.duelRequestsEnabled ~= false
+			request.Active, request.Selectable = enabled, enabled
 		end
 	end
 	for userId, entry in pairs(self.renderedEntries) do

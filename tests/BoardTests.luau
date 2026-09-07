@@ -1023,6 +1023,15 @@ check(Interface.OutcomeWords(10,10,1800) == "10/10 Words in 30:00", "Exactly thi
 check(Interface.OutcomeWords(10,10,1801) == "10/10 Words: Scenic route!", "Over thirty minutes uses a four-word playful line")
 check(Interface.OutcomeWords(0,10,0) == "0/10 Words in 00:00", "Zero-duration outcome formats correctly")
 
+;(function()
+ local owned = add(shop,"TextLabel","HintsOwned")
+ modalUi.elements.shopHintsOwned = owned
+ modalUi:updateShopTexts({hints=0})
+ check(owned.Text == "0" and owned.TextTransparency == 0.5, "Shop displays zero owned hints with empty styling")
+ modalUi:updateShopTexts({hints=30})
+ check(owned.Text == "30" and owned.TextTransparency == 0, "Shop displays the actual owned hint total")
+end)()
+
 -- Closing/reopening invalidates every queued stage and retains real pre-round progress.
 ;(function()
 	local result = {roundId="sequence-cancel",mode="Standard",theme="Animals",words=3,total=7,xpEarned=100,
@@ -1181,15 +1190,20 @@ end
  for _, category in ipairs({"WordsFound","1v1Wins"}) do
   local container = add(leaderboardPanels[category],"ScrollingFrame","Container")
   add(container,"UIListLayout","UIListLayout")
+  local bottom = add(container,"Frame","Bottom")
+  bottom.LayoutOrder = 0
+  local bottomSize = bottom.Size
   modalUi:applyLeaderboardUpdate(category,entries,50)
-  check(#container:GetChildren() == 21 and container.AutomaticCanvasSize == rbx.Enum.AutomaticSize.Y, "Leaderboard clones twenty rows and preserves the scrolling layout")
+  check(#container:GetChildren() == 22 and container.AutomaticCanvasSize == rbx.Enum.AutomaticSize.Y, "Leaderboard clones twenty rows and preserves the scrolling layout")
   local last = container:FindFirstChild("LeaderboardRank_20")
   check(last.LayoutOrder == 20 and last:FindFirstChild("Place").Text == "#20" and last:FindFirstChild("Username").Text == "Rank20", "Twentieth row displays its correct rank and identity")
   check(last:FindFirstChild("Mugshot").BackgroundColor3 == portrait.BackgroundColor3, "Ranks below third preserve the template colors")
   modalUi:renderLeaderboard()
-  check(container:FindFirstChild("LeaderboardRank_20") == last and #container:GetChildren() == 21, "Refresh reuses rows without duplicates")
+  check(container:FindFirstChild("LeaderboardRank_20") == last and #container:GetChildren() == 22, "Refresh reuses rows without duplicates")
   modalUi:applyLeaderboardUpdate(category,{entries[2]},51)
-  check(#container:GetChildren() == 2 and container:FindFirstChild("LeaderboardRank_1"):FindFirstChild("Username").Text == "Rank2", "Shrinking rankings remove stale rows and update retained identities")
+  check(#container:GetChildren() == 3 and container:FindFirstChild("LeaderboardRank_1"):FindFirstChild("Username").Text == "Rank2", "Shrinking rankings remove stale rows and update retained identities")
+  modalUi:applyLeaderboardUpdate(category,{},52)
+  check(#container:GetChildren() == 2 and container:FindFirstChild("Bottom") == bottom and bottom.Size == bottomSize and bottom.LayoutOrder > 20, "Both leaderboard tabs preserve authored Bottom padding after refresh and empty rankings")
  end
 end)()
 -- One shared backdrop follows real direct-child visibility, including external changes.
@@ -1347,6 +1361,7 @@ local function pressDuel(frame, name) for _, fn in ipairs(frame:FindFirstChild(n
 	check(#list:GetChildren() == 4 and list:FindFirstChild("UIListLayout").Padding == rbx.UDim.new(0,12), "Three eligible real-player rows preserve the authored layout and omit self and undeclared negative IDs")
 	check(list.AutomaticCanvasSize == rbx.Enum.AutomaticSize.Y, "Duel list scrolls automatically to fit its entries")
 	local first = duelUi.renderedEntries[11]
+	check(first:FindFirstChild("Request").Visible, "Missing invite preference defaults to a visible Request button")
 	local portrait, color = first:FindFirstChild("Mugshot"), first:FindFirstChild("Mugshot").BackgroundColor3
 	check(first.Size == sample.Size and first:FindFirstChild("Username").Text == "Alpha", "Duel rows clone the supplied template and bind Username exactly")
 	check(portrait.Image == "rbxthumb://type=AvatarHeadShot&id=11&w=150&h=150" and not portrait:FindFirstChild("Profile").Visible, "Duel mugshot uses the correct Roblox headshot without placeholder overlay")
@@ -1358,13 +1373,14 @@ local function pressDuel(frame, name) for _, fn in ipairs(frame:FindFirstChild(n
 	check(not first:FindFirstChild("Request").Visible and not first:FindFirstChild("Request").Active and #requests == 0, "Invites-Off opponents disable Request and cannot be challenged by the click handler")
 	roster[1].duelRequestsEnabled = true
 	duelUi:requestPlayerListUpdate(true)
-	check(first:FindFirstChild("Request").Visible and not duelUi.renderedEntries[22]:FindFirstChild("Request").Visible and not duelUi.renderedEntries[33]:FindFirstChild("Request").Visible and first:FindFirstChild("Request").Active and not duelUi.renderedEntries[22]:FindFirstChild("Request").Active and not duelUi.renderedEntries[33]:FindFirstChild("Request").Active, "Only available opponents enable Request")
+	check(first:FindFirstChild("Request").Visible and duelUi.renderedEntries[22]:FindFirstChild("Request").Visible and duelUi.renderedEntries[33]:FindFirstChild("Request").Visible and first:FindFirstChild("Request").Active and not duelUi.renderedEntries[22]:FindFirstChild("Request").Active and not duelUi.renderedEntries[33]:FindFirstChild("Request").Active, "Busy and pending opponents retain visible Request buttons but only available opponents enable them")
 	pressDuel(duelUi.renderedEntries[22],"Request")
 	check(#requests == 0, "Busy Request cannot send even if Activated fires")
 	duelUi:requestPlayerListUpdate(true)
 	check(duelUi.renderedEntries[11] == first and portrait.BackgroundColor3 == color and #list:GetChildren() == 4, "Refresh reuses rows/colors and never duplicates players")
 	pressDuel(first,"Request")
 	pressDuel(first,"Request")
+	check(first:FindFirstChild("Request").Visible and duelUi.renderedEntries[22]:FindFirstChild("Request").Visible and duelUi.renderedEntries[33]:FindFirstChild("Request").Visible, "An outgoing invitation does not hide the list's Request buttons")
 	check(#requests == 1 and requests[1].id == 11 and requests[1].mode == "Duel" and not first:FindFirstChild("Request").Active, "Request challenges the exact user once and disables pending actions immediately")
 	fireDuel(challengeSignal,{action="sent",targetId=11})
 	fireDuel(challengeSignal,{action="declined",targetId=11})

@@ -364,8 +364,8 @@ local function createView()
 	local value
 	value = viewModule.new({ screenGui = screen }, function() advances += 1 end, function() value:Close() end)
 	value:Start()
-	value.root.AbsoluteSize = roblox.Vector2.new(1600, 1200)
-	value.root.AbsolutePosition = roblox.Vector2.new(-400, -300)
+	value.root.AbsoluteSize = roblox.Vector2.new(2000, 1500)
+	value.root.AbsolutePosition = roblox.Vector2.new(-600, -450)
 	return value
 end
 actualView = createView()
@@ -386,8 +386,8 @@ for _, viewport in ipairs({ {390, 844}, {844, 390}, {1366, 768}, {1920, 1080} })
 	renderSignal:Fire()
 	check(tutorialFrame.Position == roblox.UDim2.fromScale(0.5, 0.862) and tutorialFrame.AnchorPoint == roblox.Vector2.new(0.5, 0.5), "Default tutorial position stays scaled across viewports and preserves authored anchor")
 end
-actualView.root.AbsoluteSize = roblox.Vector2.new(1600, 1200)
-actualView.root.AbsolutePosition = roblox.Vector2.new(-400, -300)
+actualView.root.AbsoluteSize = roblox.Vector2.new(2000, 1500)
+actualView.root.AbsolutePosition = roblox.Vector2.new(-600, -450)
 playButton.AbsolutePosition, playButton.AbsoluteSize = roblox.Vector2.new(350, 250), roblox.Vector2.new(200, 100)
 local talking = tweens[#tweens]
 check(talking.target == icon and talking.played and paragraph.MaxVisibleGraphemes == 1, "Icon talks only when text starts")

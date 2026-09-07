@@ -8,6 +8,7 @@ local READ_TIME_SECONDS = 2
 local CLOSE_TIME = 0.14
 local OPEN_TIME = 0.22
 local DIM_TRANSPARENCY = 0.32
+local OVERSCAN = 0.75 -- 50% farther beyond each edge than the previous 0.5 margin.
 
 -- Kingdom Wars' four-panel mask: shared integer edges prevent seams/overlap.
 function View.Mask(width, height, x, y, w, h, padding)
@@ -78,7 +79,7 @@ function View:Start()
 	self.active = true
 	self.root = Instance.new("Frame")
 	self.root.Name, self.root.BackgroundTransparency = "TutorialSpotlight", 1
-	self.root.Position, self.root.Size = UDim2.fromScale(-0.5, -0.5), UDim2.fromScale(2, 2)
+	self.root.Position, self.root.Size = UDim2.fromScale(-OVERSCAN, -OVERSCAN), UDim2.fromScale(1 + 2 * OVERSCAN, 1 + 2 * OVERSCAN)
 	self.root.BorderSizePixel, self.root.ZIndex = 0, Z
 	self.root.Parent = self.ui.screenGui
 	self.panels, self.cornerPanels, self.cornerBounds, self.cornerCoverage = {}, {}, nil, {}
@@ -164,9 +165,9 @@ function View:Layout(placeWhileHidden)
 	end
 	-- Freeze the position while shrinking/growing; relocate only at zero size.
 	if self.transitioning and not placeWhileHidden then return end
-	-- The overscan root is twice the authored ScreenGui viewport.
-	local viewport = size / 2
-	local screenOrigin = origin + viewport / 2
+	-- Recover the authored viewport independently of the extra dark coverage.
+	local viewport = size / (1 + 2 * OVERSCAN)
+	local screenOrigin = origin + viewport * OVERSCAN
 	local safeTarget = { p.X - screenOrigin.X - padding, p.Y - screenOrigin.Y - padding,
 		s.X + padding * 2, s.Y + padding * 2 }
 	local frameSize = self.frame.AbsoluteSize
