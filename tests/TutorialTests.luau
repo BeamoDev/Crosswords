@@ -36,8 +36,8 @@ local data = {
 	end,
 }
 local services = {
-	Players = players,
-	ReplicatedStorage = folder({ shared = folder({ puzzle = { PuzzleGenerator = Generator }, network = { NetworkContract = Contract } }) }),
+	Players = players, Workspace = {GetServerTimeNow = function() return now end},
+	ReplicatedStorage = folder({ shared = folder({ config = folder({ProgressionConfig = require("../src/shared/config/ProgressionConfig"), GameConfig = require("../src/shared/config/GameConfig")}), puzzle = { PuzzleGenerator = Generator }, network = { NetworkContract = Contract } }) }),
 	HttpService = { GenerateGUID = function() counter += 1 return "tutorial_" .. counter end },
 }
 local server = luau.load(fs.readFile("src/server/services/TutorialService.luau"), { environment = {
@@ -61,7 +61,7 @@ check(not request({ action = "Start" }).success, "Cannot overlay an active real 
 actor.attributes.RoundBusy = false
 local start = request({ action = "Start" })
 local round = start.round
-check(start.success and #round.puzzle.words == 2 and #round.puzzle.letters == 4, "Private onboarding board is two words on 4x4")
+check(start.success and #round.puzzle.words == 3 and #round.puzzle.letters == 3 and #round.puzzle.letters[1] == 3, "Practice fills a 3x3 board with three words")
 check(round.puzzle.placedWordsByWord.CAT and round.puzzle.placedWordsByWord.DOG, "Practice uses familiar CAT/DOG")
 check(request({ action = "Start" }).round.id == round.id, "Repeated Start keeps the same session")
 check(not request({ action = "Complete", roundId = round.id }).success and saves == 0, "Cannot fake tutorial win")
@@ -71,7 +71,12 @@ check(request({ action = "Word", roundId = round.id, word = "CAT", path = round.
 check(not request({ action = "Word", roundId = round.id, word = "CAT", path = round.puzzle.placedWordsByWord.CAT.path }).success, "Duplicate word rejected")
 local hint = request({ action = "Hint", roundId = round.id })
 check(hint.success and hint.round.members[1].hintedWords.DOG, "Practice hint works at zero inventory")
-check(request({ action = "Word", roundId = round.id, word = "DOG", path = round.puzzle.placedWordsByWord.DOG.path }).success, "Second word wins practice")
+check(request({ action = "Word", roundId = round.id, word = "DOG", path = round.puzzle.placedWordsByWord.DOG.path }).success, "Second practice word validates")
+check(not request({ action = "Complete", roundId = round.id }).success, "Two words cannot finish a nine-tile practice board")
+local foxPath = round.puzzle.placedWordsByWord.FOX.path
+check(request({action="Word", roundId=round.id, word="FOX", path={foxPath[3],foxPath[2],foxPath[1]}}).success, "Backward FOX completes practice")
+local finishedPractice = request({action="Sync",roundId=round.id}).round.members[1]
+check(finishedPractice.score >= 750 and finishedPractice.score <= 1750, "Practice tracks 750 letter points plus completion speed without touching real XP")
 check(profiles[12].hints == 0 and profiles[12].progression.xp == 0, "Practice leaves real hint/XP balance unchanged")
 saved = false
 check(request({ action = "Complete", roundId = round.id }).saved == false, "Failed durable save exposed to client")
@@ -94,6 +99,19 @@ local departing = request({ action = "Start" }).round
 removed(actor)
 check(not request({ action = "Word", roundId = departing.id, word = "CAT", path = departing.puzzle.placedWordsByWord.CAT.path }).success, "Disconnect removes practice session")
 
+
+do
+ fresh()
+ local timed = request({action="Start"}).round
+ check(timed.timeLimit == 180 and timed.expiresAt == now+180, "Practice publishes its three-minute deadline")
+ now = timed.expiresAt
+ local expired = request({action="Sync",roundId=timed.id})
+ check(expired.round.members[1].timedOut and not profiles[12].tutorial.completed, "Practice expiry does not complete onboarding")
+ check(not request({action="Word",roundId=timed.id,word="CAT",path=timed.puzzle.placedWordsByWord.CAT.path}).success, "Expired practice rejects late words")
+ local retry = request({action="Start"}).round
+ check(retry.id ~= timed.id and retry.expiresAt > timed.expiresAt and not retry.members[1].failed, "Practice retry gets a fresh board and deadline")
+ fresh()
+end
 -- Exercise the actual spotlight geometry independently of a Studio renderer.
 local view = luau.load(fs.readFile("src/client/features/TutorialView.luau"), { environment = {
 	game = { GetService = function() return {} end },
@@ -114,16 +132,16 @@ local ui = {}
 local function node(name, class)
 	local item = roblox.Instance.new(class or "Frame") item.Name = name return item
 end
-for _, name in ipairs({ "standard", "play", "waiting", "boardPanel", "wordPanel", "subtitle", "hint", "game", "home", "exit" }) do
+for _, name in ipairs({ "standard", "play", "waiting", "boardPanel", "wordPanel", "subtitle", "hint", "game", "home" }) do
 	ui[name] = node(name, (name == "waiting" or name == "subtitle") and "TextLabel" or "Frame")
 end
-ui.exit.Visible = true
 local level = node("LevelBar") level.Parent = ui.game
 local reward = node("NextLevelRewardTitle", "TextLabel") reward.Parent = level
 local stubView = {}
 function stubView.new(_, advance, skip)
 	local value = { advance = advance, skip = skip }
 	function value:Start() self.active = true end
+	function value:SetDragGuide(grid, path, columns, rows, busy) self.guideGrid, self.guidePath, self.guideBusy = grid, path, busy end
 	function value:Celebrate() self.celebrated = true end
 	function value:Show(title, message, target, autoAdvance) self.title, self.message, self.target, self.autoAdvance, self.typing = title, message, target, autoAdvance, false end
 	function value:Collapse(callback) self.collapsing, self.onCollapsed = true, callback end
@@ -137,6 +155,7 @@ function board:Cancel() self.cancelled = true end
 function board:PortraitColor() return roblox.Color3.fromRGB(173, 195, 204) end
 function board:Build(puzzle)
 	self.puzzle = puzzle
+	self.height, self.width = #puzzle.letters, #puzzle.letters[1]
 	for _, row in pairs(self.rows) do row:Destroy() end
 	self.rows = {}
 	for _, word in ipairs(puzzle.words) do
@@ -167,20 +186,15 @@ local callbacks = {
 fresh()
 local tutorial = client.new(ui, board, callbacks)
 tutorial:Start(profiles[12])
-check(tutorial.step == "Welcome" and ui.waiting.Text == "1 Waiting" and homeCount == 1, "Tutorial starts with Welcome on Home")
-tutorial:Advance()
-check(tutorial.step == "Play", "Welcome advances straight to Play")
+check(tutorial.step == "FindCat" and gameCount == 1 and homeCount == 0 and board.grid.Visible and ui.exit == nil, "Tutorial opens practice directly in Game without visiting Home or requiring Play")
+check(tutorial.view.message == "Make CAT!" and tutorial.view.guidePath == tutorial.round.puzzle.placedWordsByWord.CAT.path, "CAT uses short copy and the canonical drag demonstration")
 tutorial.view.typing = true
-tutorial:Play()
-check(tutorial.step == "Play" and gameCount == 0, "Play waits until its short instruction is ready")
+check(not tutorial:CanUseBoard(), "Board waits until its short instruction is ready")
 tutorial.view.typing = false
-tutorial.view.transitioning = true
-tutorial:Play()
-check(gameCount == 0, "Play is locked during panel transitions")
-tutorial.view.transitioning = false
-tutorial:Play()
-check(tutorial.step == "Words" and gameCount == 1 and board.grid.Visible and not ui.exit.Visible, "Play opens practice immediately with Exit hidden")
-tutorial:Advance()
+board.startCell = {row=1,column=1}
+check(tutorial.view.guideBusy(), "Real player drag suppresses the demonstration")
+board.startCell = nil
+check(not tutorial.view.guideBusy(), "Demonstration resumes when the player is idle")
 check(tutorial:CanUseBoard() and not tutorial.view.autoAdvance, "First practice step waits for a word")
 tutorial.view.transitioning = true
 check(not tutorial:CanUseBoard(), "Board input is locked during panel transitions")
@@ -189,24 +203,30 @@ tutorial:Submit("DOG", tutorial.round.puzzle.placedWordsByWord.DOG.path)
 check(tutorial.step == "FindCat" and not board.found.DOG, "Practice keeps learner on first word")
 tutorial:Submit("CAT", tutorial.round.puzzle.placedWordsByWord.CAT.path)
 check(tutorial.step == "TryHint" and board.found.CAT, "CAT goes straight to the hint step")
+check(not tutorial.view.guidePath, "Hint step clears the CAT demonstration")
 check(not board.rows.DOG.FoundPanel:FindFirstChild("TutorialExample") and not board.found.DOG, "Tutorial never inserts an example portrait")
 tutorial:Advance() tutorial:Hint()
 check(tutorial.step == "FindDog" and board.hinted.DOG, "Free hint advances final practice task")
+check(tutorial.view.message == "Make DOG!" and tutorial.view.guidePath == tutorial.round.puzzle.placedWordsByWord.DOG.path, "DOG uses its own canonical guide")
 tutorial:Submit("DOG", tutorial.round.puzzle.placedWordsByWord.DOG.path)
-check(tutorial.step == "Win" and board.found.DOG and tutorial.view.autoAdvance and tutorial.view.celebrated, "Win explanation will return home automatically")
+check(tutorial.step == "FindFox" and tutorial:CanUseBoard(), "Last practice step permits either direction")
+check(tutorial.view.message == "Make FOX!" and tutorial.view.guidePath == tutorial.round.puzzle.placedWordsByWord.FOX.path, "FOX uses short copy and its own guide")
+local finalPath = tutorial.round.puzzle.placedWordsByWord.FOX.path
+tutorial:Submit("FOX", {finalPath[3], finalPath[2], finalPath[1]})
+check(tutorial.step == "Win" and board.found.FOX and tutorial.view.autoAdvance and tutorial.view.celebrated, "Win explanation will return home automatically")
 tutorial:Advance()
-check(tutorial.pending and tutorial.step == "Win" and tutorial.view.collapsing and homeCount == 1, "Win collapses guidance before starting the Home transition")
+check(tutorial.pending and tutorial.step == "Win" and tutorial.view.collapsing and homeCount == 0, "Win collapses guidance before starting the Home transition")
 tutorial.view.onCollapsed()
 check(tutorial.view.suspended and homeFinished and tutorial.step == "Win", "Congrats waits for animated Home completion")
 homeCount += 1
 homeFinished()
-check(tutorial.step == "HomeCongrats" and homeCount == 2 and tutorial.active and not tutorial.finished, "Win returns Home before the final congratulations")
+check(tutorial.step == "HomeCongrats" and homeCount == 1 and tutorial.active and not tutorial.finished, "Win returns Home before the final congratulations")
 check(tutorial.view.title == "Tutorial done!" and tutorial.view.message == "Have fun finding words!" and tutorial.view.autoAdvance, "Final Home message advances automatically")
 check(tutorial.view.target == nil, "Home congratulations do not spotlight any Home control")
 tutorial:Advance()
 check(tutorial.pending and tutorial.view.collapsing and not tutorial.finished and #jobs == 0, "Final message shrinks before completion cleanup")
 tutorial.view.onCollapsed()
-check(tutorial.finished and not tutorial.active and tutorial.view.closed and ui.exit.Visible and restores == 1, "Finish cleans up after the final collapse")
+check(tutorial.finished and not tutorial.active and tutorial.view.closed and ui.exit == nil and restores == 1, "Finish cleans up after the final collapse")
 local job = table.remove(jobs, 1) job()
 check(profiles[12].tutorial.completed and not profiles[12].tutorial.skipped, "Practice win is saved as completion")
 tutorial:Start({ tutorial = { completed = false } })
@@ -232,11 +252,11 @@ lateCallbacks.remote = { InvokeServer = function(_, payload)
 	return result
 end }
 lateTutorial = client.new(ui, board, lateCallbacks)
-lateTutorial:Start(profiles[12])
 local openedBeforeLateReply = gameCount
+lateTutorial:Start(profiles[12])
 lateTutorial:Advance()
 lateTutorial:Play()
-check(not lateTutorial.active and gameCount == openedBeforeLateReply, "Delayed Start reply cannot reopen practice after Skip")
+check(not lateTutorial.active and gameCount == openedBeforeLateReply + 1 and not lateTutorial.round, "Delayed Start reply cannot reopen practice after Skip")
 job = table.remove(jobs, 1) job()
 check(profiles[12].tutorial.skipped, "Skip during Start still saves completion")
 
@@ -253,6 +273,57 @@ check(exitTutorial.finished and not exitTutorial.active and exitTutorial.step~="
 job=table.remove(jobs,1) job()
 check(profiles[12].tutorial.skipped, "Skip during Home transition still persists")
 
+
+do
+ fresh()
+ local timedTutorial = client.new(ui,board,callbacks)
+ timedTutorial:Start(profiles[12])
+ local oldId = timedTutorial.round.id
+ now = timedTutorial.round.expiresAt
+ timedTutorial:Tick(now)
+ check(timedTutorial.pending and #jobs == 1, "Expired practice asks the server once while a timeout sync is pending")
+ timedTutorial:Tick(now)
+ check(#jobs == 1, "Repeated frames cannot duplicate the pending timeout request")
+ table.remove(jobs,1)()
+ check(timedTutorial.step == "Retry" and not timedTutorial:CanUseBoard() and not profiles[12].tutorial.completed, "Server timeout replaces guidance with retry without completing practice")
+ local homesBeforeRetry = homeCount
+ timedTutorial:Advance()
+ check(timedTutorial.round.id ~= oldId and timedTutorial.step == "FindCat" and homeCount == homesBeforeRetry, "Retry opens fresh practice directly within Game")
+ timedTutorial:Finish(true) table.remove(jobs,1)()
+end
+do
+ fresh()
+ local attempts = 0
+ local retryCallbacks = table.clone(callbacks)
+ retryCallbacks.remote = {InvokeServer = function(_, payload)
+  if payload.action == "Start" then
+   attempts += 1
+   if attempts <= 2 then return nil end
+  end
+  return request(payload)
+ end}
+ local loading = client.new(ui,board,retryCallbacks)
+ local homesBeforeLoading = homeCount
+ loading:Start(profiles[12])
+ check(loading.step == "Loading" and not loading:CanUseBoard() and not loading.view.guidePath, "Failed initial request stays in Game with input blocked")
+ loading:Tick(now)
+ loading:Tick(now + 0.5)
+ check(attempts == 2 and loading.step == "Loading", "Loading retry does not repeat every frame")
+ loading:Tick(now + 2)
+ check(attempts == 3 and loading.step == "FindCat" and homeCount == homesBeforeLoading, "Loading recovers automatically without a Home detour")
+ loading:Finish(true) table.remove(jobs,1)()
+ fresh()
+ local emptyBoard = {rows={}, Cancel=function() end}
+ local skipLoading
+ retryCallbacks.remote = {InvokeServer=function(_,payload)
+  if payload.action == "Start" then skipLoading:Finish(true) return nil end
+  return request(payload)
+ end}
+ skipLoading=client.new(ui,emptyBoard,retryCallbacks)
+ skipLoading:Start(profiles[12])
+ check(skipLoading.finished and not skipLoading.active, "Skip before a grid exists safely closes initial loading")
+ table.remove(jobs,1)()
+end
 -- Exercise typewriter cancellation, actual view teardown without assigning UI focus.
 local function signal()
 	local value = { callbacks = {} }
@@ -362,7 +433,7 @@ local viewModule = luau.load(fs.readFile("src/client/features/TutorialView.luau"
 local advances, actualView = 0, nil
 local function createView()
 	local value
-	value = viewModule.new({ screenGui = screen }, function() advances += 1 end, function() value:Close() end)
+	value = viewModule.new({ screenGui = screen, game = {Visible=true} }, function() advances += 1 end, function() value:Close() end)
 	value:Start()
 	value.root.AbsoluteSize = roblox.Vector2.new(2000, 1500)
 	value.root.AbsolutePosition = roblox.Vector2.new(-600, -450)
@@ -410,12 +481,12 @@ advanceViewTime(0.139)
 check(tutorialFrame.Position == oldPosition, "Panel cannot move before shrink completes")
 advanceViewTime(0.0011)
 check(tutorialFrame.Size == roblox.UDim2.fromScale(0, 0) and actualView.target == nextTarget and heading.Text == "Hint", "Spotlight and content change only at zero size")
-check(tutorialFrame.Position == roblox.UDim2.fromScale(0.4, 0.862), "Hint shifts tutorial left to the requested position while collapsed")
+check(tutorialFrame.Position == oldPosition and actualView.frameTween.goal.Position == roblox.UDim2.fromScale(0.5, 0.2), "Hint tweens toward top center instead of jumping or covering the bulb")
 local newPosition = tutorialFrame.Position
 renderSignal:Fire()
-check(tutorialFrame.Position == newPosition and actualView.frameTween.goal.Size == originalFrameSize, "Opening restores authored Size at the new position")
+check(tutorialFrame.Position == newPosition and actualView.frameTween.goal.Size == originalFrameSize, "Per-frame layout cannot override the active position tween")
 advanceViewTime(0.23)
-check(not actualView.transitioning and tutorialFrame.Size == originalFrameSize, "Step transition finishes at original size")
+check(not actualView.transitioning and tutorialFrame.Size == originalFrameSize and tutorialFrame.Position == roblox.UDim2.fromScale(0.5,0.2), "Hint finishes at requested top-center position and authored size")
 advanceViewTime(0.3)
 check(nextTarget.Selectable and guiService.SelectedObject == nil, "Action step becomes selectable without assigning UI focus")
 advanceViewTime(30)
@@ -541,5 +612,43 @@ if fade then for _,piece in ipairs(fade:GetDescendants()) do passive=passive and
 check(passive and not actualView:BlocksPointer(roblox.Vector2.new(10,10)),"Skip immediately releases input while a passive spotlight copy fades away")
 advanceViewTime(0.15)
 check(not screen:FindFirstChild("TutorialSpotlightFade"),"Faded spotlight copy is removed after closing")
+
+-- Passive pointer motion follows the actual cell geometry and never submits input.
+do
+ local guideView = createView()
+ local grid = mockNode("Frame", "PracticeGrid") grid.Parent = screen
+ grid.AbsolutePosition, grid.AbsoluteSize = roblox.Vector2.new(100, 120), roblox.Vector2.new(300,300)
+ local path = {{row=1,column=1},{row=1,column=2},{row=2,column=2}}
+ local dragging = false
+ guideView:SetDragGuide(grid,path,3,3,function() return dragging end)
+ local pointer = guideView.dragImage
+ check(pointer.Image == "rbxassetid://130798161958633" and not pointer.Active and not pointer.Selectable, "Requested image is passive and cannot steal pointer or controller input")
+ guideView:UpdateDragGuide(0.1)
+ check(pointer.Visible and pointer.Position == roblox.UDim2.fromOffset(750,620), "Pointer starts at C with spotlight overscan offset accounted for")
+ for _=1,10 do guideView:UpdateDragGuide(0.1) end
+ check(math.abs(pointer.Position.X.Offset-850)<0.01 and pointer.Position.Y.Offset>620 and pointer.Position.Y.Offset<625, "Pointer reaches A before turning toward T")
+ for _=1,7 do guideView:UpdateDragGuide(0.1) end
+ check(pointer.Position == roblox.UDim2.fromOffset(850,720), "Pointer reaches T along the bending path")
+ for _=1,8 do guideView:UpdateDragGuide(0.1) end
+ check(not pointer.Visible, "Demonstration fades away before looping")
+ dragging=true guideView:UpdateDragGuide(0.1)
+ check(not pointer.Visible and guideView.dragGuide.elapsed==0, "Player drag hides and resets the demonstration")
+ dragging=false guideView.typing=true guideView:UpdateDragGuide(0.1)
+ check(not pointer.Visible, "Typing hides the demonstration")
+ guideView.typing=false guideView.transitioning=true guideView:UpdateDragGuide(0.1)
+ check(not pointer.Visible, "Step animation hides the demonstration")
+ guideView.transitioning=false
+ grid.AbsolutePosition, grid.AbsoluteSize = roblox.Vector2.new(10,20),roblox.Vector2.new(150,150)
+ guideView:UpdateDragGuide(0.1)
+ check(pointer.Position == roblox.UDim2.fromOffset(635,495) and pointer.Size==roblox.UDim2.fromOffset(27.5,27.5), "Resizing or moving the board keeps the pointer aligned and scaled")
+ guideView.ui.game.Visible=false guideView:UpdateDragGuide(0.1)
+ check(not pointer.Visible, "Pointer stops when Game is hidden")
+ guideView:Show("Hint", "Tap the bulb.",nextTarget,false,true)
+ check(pointer.destroyed and not guideView.dragImage and not guideView.dragGuide, "Changing steps destroys the old guide")
+ guideView:SetDragGuide(grid,path,3,3)
+ local closingPointer=guideView.dragImage
+ guideView:Close()
+ check(closingPointer.destroyed and not guideView.dragGuide, "Closing or skipping removes the pointer and animation state")
+end
 
 print("TUTORIAL_TESTS_PASSED=" .. checks)

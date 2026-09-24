@@ -70,7 +70,7 @@ local generator = {
 }
 local botConfig = { Enabled = false, ServerSize = 12 }
 local shared = { puzzle = { PuzzleGenerator = generator },
-	config = { ProgressionConfig = Config, GameConfig = { Bots = botConfig, Economy = { CalculateCompletionPieces = function() return 16 end } } },
+	config = { ProgressionConfig = Config, GameConfig = { RoundSeconds = require("../src/shared/config/GameConfig").RoundSeconds, Bots = botConfig, Economy = { CalculateCompletionPieces = function() return 16 end } } },
 	network = { NetworkContract = Contract } }
 local function wait(self, name) return assert(self[name], name) end
 shared.WaitForChild = wait
@@ -367,7 +367,7 @@ check(not request(b,{action="Word",roundId=firstBoard.id,word="CAT",path=expecte
 check(not request(c,{action="Word",roundId=firstBoard.id,word="CAT",path=expected.placedWordsByWord.CAT.path}).success,"Public player cannot enter a private round through word requests")
 check(request(a,{action="LeaveQueue"}).round.id==firstBoard.id and a:GetAttribute("RoundBusy"),"Late LeaveQueue cannot discard an already-started private round")
 request(a,{action="Word",roundId=firstBoard.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
-now+=180
+now+=60
 local slowed=request(a,{action="Sync"})
 check(slowed.queue.count==0 and #slowed.round.members==#firstBoard.members,"Active private round neither requeues bots nor removes its portraits")
 for _,member in ipairs(slowed.round.members) do if member.isBot then check(not member.completed,"Beginner companions cannot finish ahead even at the last word") end end
@@ -446,4 +446,61 @@ local solo = request(a,{action="StartSolo",mode="Standard"}).round
 check(solo and solo.solo and solo.mode == "Standard" and #solo.members == 1 and solo.members[1].userId == a.UserId, "Queue Solo starts a private Classic immediately without bots")
 check(solo.puzzle and now < waiting.deadline, "Solo bypasses the remaining queue countdown")
 for _, member in ipairs(request(a,{action="Sync"}).queue.members) do check(member.userId ~= a.UserId, "Solo removes player from waiting roster") end
+do
+	request(a,{action="Exit",roundId=solo.id})
+	expected.rules = "Strands"
+	now += 1.1
+	local bonusRound = request(a,{action="StartSolo",mode="Standard"}).round
+	local xpBefore, foundBefore = profiles[1].progression.xp, profiles[1].progression.wordsFound
+	local path = {{row=1,column=1},{row=2,column=2},{row=1,column=3}} -- COT
+	local extra = request(a,{action="Word",roundId=bonusRound.id,word="FAKE",path=path,xp=99999})
+	check(extra.success and extra.bonusWord=="COT" and extra.snapshot==nil and profiles[1].progression.xp==xpBefore, "Server accepts the real extra word without awarding claimed XP or publishing a profile change")
+	check(extra.round.members[1].score==0 and extra.round.members[1].count==0 and extra.round.members[1].bonusWords.COT and extra.round.members[1].xpEarned==0 and profiles[1].progression.wordsFound==foundBefore, "Extra words do not advance XP, theme score, wins or word leaderboard")
+	check(not request(a,{action="Word",roundId=bonusRound.id,word="COT",path={path[3],path[2],path[1]}}).success and profiles[1].progression.xp==xpBefore, "Backward repeat cannot farm bonus XP")
+	check(not request(a,{action="Word",roundId=bonusRound.id,word="COT",path={{row=1,column=1},{row=1,column=1},{row=1,column=3}}}).success, "Repeated-cell bonus request is rejected")
+	request(a,{action="Word",roundId=bonusRound.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
+	request(a,{action="Word",roundId=bonusRound.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+	check(profiles[1].progression.xp==xpBefore+120+Config.Experience.CompletionBonus, "Theme completion still awards full normal XP")
+	check(not request(a,{action="Word",roundId=bonusRound.id,word="TAG",path={{row=1,column=3},{row=1,column=2},{row=2,column=3}}}).success, "Completed boards cannot keep generating bonus XP")
+	request(a,{action="Exit",roundId=bonusRound.id})
+	expected.rules = nil
+end
+
+do
+ profiles[1].progression.level = 25
+ for mode, duration in pairs({Standard=180,Mini=90,Jumbo=300,Hardcore=180}) do
+  now += 2
+  local timed = request(a,{action="StartSolo",mode=mode}).round
+  check(timed and timed.timeLimit == duration and timed.expiresAt == now + duration, mode .. " has the configured server deadline")
+  request(a,{action="Word",roundId=timed.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
+  local xp, hints, losses = profiles[1].progression.xp, profiles[1].hints, profiles[1].testLosses or 0
+  now = timed.expiresAt - 0.2
+  local late = request(a,{action="Word",roundId=timed.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+  check(not late.success and late.round.members[1].timedOut and late.round.members[1].duration == duration, "Exact deadline rejects the final word and records timeout")
+  check(not request(a,{action="Hint",roundId=timed.id}).success and profiles[1].hints == hints, "Expired board never spends hints")
+  request(a,{action="Sync"})
+  check(profiles[1].progression.xp == xp and profiles[1].testLosses == losses+1 and late.round.members[1].xpEarned == 60, "Timeout preserves earned XP without completion reward or repeated loss")
+  request(a,{action="Exit",roundId=timed.id})
+ end
+end
+
+do
+ now += 2
+ local round = request(a,{action="StartSolo",mode="Standard"}).round
+ check(round.members[1].score == 0, "New round starts with zero score")
+ request(a,{action="Word",roundId=round.id,word="CAT",path=expected.placedWordsByWord.CAT.path,score=999999})
+ profiles[1].hints = 1
+ request(a,{action="Hint",roundId=round.id})
+ now = round.expiresAt - 90 - 0.2
+ local won = request(a,{action="Word",roundId=round.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+ check(won.round.members[1].score == 950 and won.round.members[1].xpEarned == 240, "Round score is 300 unhinted + 150 hinted + 500 half-time completion, independently of XP")
+ request(a,{action="Word",roundId=round.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+ now += 300
+ check(request(a,{action="Sync"}).round.members[1].score == 950, "Final score freezes and cannot be increased by duplicates or expiry")
+ request(a,{action="Exit",roundId=round.id})
+ now += 2
+ local replay = request(a,{action="StartSolo",mode="Standard"}).round
+ check(replay.members[1].score == 0, "Replay resets score without restoring the previous round total")
+ request(a,{action="Exit",roundId=replay.id})
+end
 print("QUEUE_SERVICE_TESTS_PASSED=" .. checks)

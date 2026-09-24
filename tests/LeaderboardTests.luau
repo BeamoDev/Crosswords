@@ -14,12 +14,14 @@ end
 local sent, loops, stores = {}, {}, {}
 local failRead, failWrite, duringWrite = false, false, nil
 local wordsStore, winsStore = config.Meta.LEADERBOARD.WordsFoundStoreName, config.Meta.LEADERBOARD.DuelWinsStoreName
+local levelStore = config.Meta.LEADERBOARD.LevelStoreName
 local initial = {
+	[levelStore] = { ["101"]=80, ["102"]=40, ["103"]=20 },
 	[wordsStore] = { ["101"]=500, ["102"]=300, ["103"]=200, ["104"]=100 },
 	[winsStore] = { ["104"]=50, ["103"]=20, ["102"]=10 },
 }
 local dataStores = { GetOrderedDataStore = function(_, name)
-	check(name ~= "WordHuntQueueLevels_v1", "Retired level index is never opened or overwritten")
+	check(name == wordsStore or name == winsStore or name == levelStore, "Only configured ranking indexes are opened")
 	if not stores[name] then
 		local store = { values = initial[name] or {} }
 		function store:GetSortedAsync(ascending, limit)
@@ -70,17 +72,20 @@ local social = luau.load(fs.readFile("src/server/services/SocialService.luau"), 
 	warn=function() warnings += 1 end,
 	task={spawn=function(fn) table.insert(loops, coroutine.create(fn)) end,wait=function(delay) return coroutine.yield(delay) end},
 } })()
-local function snapshot(words,wins) return { progression={level=999,wordsFound=words,duel={wins=wins}} } end
+local function snapshot(words,wins,level) return { score=999999, progression={level=level or 12,wordsFound=words,duel={wins=wins}} } end
 social.MarkSnapshotDirty(a,snapshot(700,5))
-social.MarkSnapshotDirty(b,snapshot(300,60))
+social.MarkSnapshotDirty(b,snapshot(300,60,90))
 social.MarkSnapshotDirty(player(-10),snapshot(99999,99999))
 social.MarkSnapshotDirty(player(3,false),snapshot(99999,99999))
 social.Initialize()
-check(#sent == 4, "Initialization sends both categories with personal ranks to each player")
+check(#sent == 6, "Initialization sends all three categories with personal ranks to each player")
 local entries = social.GetCategoryCache("WordsFound")
 check(#entries == 6 and entries[1].UserId == 1 and entries[1].Score == 700 and entries[2].UserId == 101 and entries[3].UserId == 2, "Words ranks combine trusted live stats with global top three and deterministic ties")
 local wins = social.GetCategoryCache("1v1Wins")
 check(wins[1].UserId == 2 and wins[1].Score == 60 and wins[2].UserId == 104, "Duel wins do not rank by level or words found")
+local levels = social.GetCategoryCache("Level")
+check(levelStore=="WordHuntQueueLevels_v1" and levels[1].UserId==2 and levels[1].Score==90 and levels[2].UserId==101 and levels[2].Score==80,"Level ranks saved XP progression alongside existing global level records")
+check(social.GetPersonalEntry(a,"Level").Rank==5 and social.GetPersonalEntry(a,"Level").Score==12,"Personal Level rank uses saved progression, not round score or score level")
 check(entries[1].Thumbnail == "headshot:1" and entries[1].Username == "User1", "Ranked identities use the actual Roblox account")
 check(#social.GetCategoryCache("Solves") == 0, "Unknown retired category returns no data")
 check(social.GetPersonalEntry(a,"WordsFound").Rank == 1 and social.GetPersonalEntry(a,"1v1Wins").Rank == 5, "Personal ranks are global and category-specific beyond the podium")
@@ -90,29 +95,32 @@ check(reads == cachedReads, "Personal rank lookups perform no DataStore reads")
 local request = storage.Remotes.Events[contract.Legacy.LeaderboardRequest].OnServerEvent.callbacks[1]
 local readsBefore, sentBefore = reads, #sent
 request(a)
-check(reads == readsBefore and #sent == sentBefore + 2, "Opening sends both caches without new global reads")
-check(sent[#sent].args[1] == "WordsFound" or sent[#sent].args[1] == "1v1Wins", "Remote packets identify their category")
+check(reads == readsBefore and #sent == sentBefore + 3, "Opening sends all three caches without new global reads")
+check(sent[#sent].args[1] == "WordsFound" or sent[#sent].args[1] == "1v1Wins" or sent[#sent].args[1] == "Level", "Remote packets identify their category")
 check(type(sent[#sent].args[4]) == "number", "Remote packets include independent ordering revisions")
 request(a)
-check(#sent == sentBefore + 2, "Repeated requests are throttled")
+check(#sent == sentBefore + 3, "Repeated requests are throttled")
 now += 1000
 request(a)
 check(reads == readsBefore, "Even stale cached requests cannot spam DataStore refreshes")
 social.FlushAll()
 check(stores[wordsStore].values["1"] == 700 and stores[winsStore].values["2"] == 60, "Flush writes exact authoritative totals to separate indexes")
 check(stores[wordsStore].values["-10"] == nil and stores[wordsStore].values["3"] == nil, "Bots and unloaded profiles are never indexed")
-social.MarkSnapshotDirty(a,snapshot(100,1))
+check(stores[levelStore].values["1"]==12 and stores[levelStore].values["2"]==90 and not stores[levelStore].values["-10"] and not stores[levelStore].values["3"],"Level writes exclude bots and unloaded players")
+social.MarkSnapshotDirty(a,snapshot(100,1,1))
 social.FlushAll()
 check(stores[wordsStore].values["1"] == 700 and stores[winsStore].values["1"] == 5, "An older session cannot lower an existing lifetime total")
-social.MarkSnapshotDirty(a,snapshot(800,6))
+check(stores[levelStore].values["1"]==12,"An older session cannot lower the stored level")
+social.MarkSnapshotDirty(a,snapshot(800,6,13))
 failWrite = true
-duringWrite = function() social.MarkSnapshotDirty(a,snapshot(900,7)) social.FlushPlayer(a) end
+duringWrite = function() social.MarkSnapshotDirty(a,snapshot(900,7,14)) social.FlushPlayer(a) end
 social.FlushPlayer(a)
 roster = {b}
 for _, callback in ipairs(players.PlayerRemoving.callbacks) do callback(a) end
 failWrite = false
 social.FlushAll()
 check(stores[wordsStore].values["1"] == 900 and stores[winsStore].values["1"] == 7, "Failed concurrent writes retain the newer total and retry after disconnect")
+check(stores[levelStore].values["1"]==14,"Latest level survives a failed concurrent write and disconnect")
 social.Refresh()
 local prior, priorAt = social.GetCategoryCache("WordsFound")
 now += 120
@@ -126,7 +134,7 @@ for _, thread in ipairs(loops) do local ok,delay=coroutine.resume(thread) assert
 check(delays[300] ~= nil and delays[60] ~= nil, "Global refresh loop waits five minutes and writes run every minute")
 readsBefore = reads
 local ok, delay = coroutine.resume(delays[300])
-check(ok and delay == 300 and reads == readsBefore + 2, "Each scheduled refresh reloads both global rankings and broadcasts")
+check(ok and delay == 300 and reads == readsBefore + 3, "Each scheduled refresh reloads all three global rankings and broadcasts")
 check(warnings >= 3, "Failure and retry checks exercised real warning paths")
 stores[wordsStore].values = {}
 for index=1,120 do stores[wordsStore].values[tostring(1000+index)] = 1000-index end
@@ -139,4 +147,11 @@ check(social.GetPersonalEntry(b,"WordsFound").Rank == nil and social.GetPersonal
 social.MarkSnapshotDirty(b,snapshot(900,60))
 check(social.GetPersonalEntry(b,"WordsFound").RankText == "--", "Ties at a truncated page boundary never invent an exact rank")
 check(social.GetPersonalEntry(player(99),"WordsFound").RankText == "--", "Missing or zero scores have no fabricated placement")
+do
+ local priorLevels, priorTime=social.GetCategoryCache("Level")
+ failRead=true now+=60 social.RefreshCategory("Level")
+ local retainedLevels, retainedTime=social.GetCategoryCache("Level")
+ check(retainedLevels[1].UserId==priorLevels[1].UserId and retainedLevels[1].Score==priorLevels[1].Score and retainedTime==priorTime,"Level read failure preserves the last global rankings")
+ failRead=false
+end
 print("LEADERBOARD_TESTS_PASSED=" .. checks)

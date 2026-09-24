@@ -2,6 +2,7 @@ local DuelService = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local servicesFolder = script.Parent
 local DuelBots = require(servicesFolder:WaitForChild("DuelBots"))
@@ -104,7 +105,7 @@ local function getMatchGridSize(match)
 		return "unknown"
 	end
 
-	return string.format("%dx%d", numericGridSize, numericGridSize)
+	return string.format("%dx%d", tonumber(match.puzzleData.gridWidth) or numericGridSize, numericGridSize)
 end
 
 local function applyDuelOutcome(player, didWin, rewardAmount, sourceType, details)
@@ -143,7 +144,6 @@ local function buildPuzzleData(modeName, player1, opponentId)
 	if not definition then
 		return nil
 	end
-	definition.gridSize = math.max(11, math.floor(tonumber(definition.gridSize) or 11))
 
 	local generated = PuzzleGenerator.generate(definition, seed)
 	generated.level = generated.level or level
@@ -243,15 +243,19 @@ local function broadcastProgress(match)
 	fireProgressEvent(match.player1.player, {
 		matchId = match.id,
 		myProgress = match.player1.progress,
+		myScore = match.player1.score,
 		opponentProgress = match.player2.progress,
 		myFoundWords = table.clone(match.player1.foundWords),
+		myBonusWords = table.clone(match.player1.bonusWords or {}),
 		opponentFoundWords = table.clone(match.player2.foundWords),
 	})
 	fireProgressEvent(match.player2.player, {
 		matchId = match.id,
 		myProgress = match.player2.progress,
+		myScore = match.player2.score,
 		opponentProgress = match.player1.progress,
 		myFoundWords = table.clone(match.player2.foundWords),
+		myBonusWords = table.clone(match.player2.bonusWords or {}),
 		opponentFoundWords = table.clone(match.player1.foundWords),
 	})
 end
@@ -310,6 +314,21 @@ local function completeMatch(matchId, quitterId)
 	end
 
 	match.state = "finished"
+	if match.timedOut and not match.winner then
+		local offer = {match=match, votes={}}
+		match.rematchOffer = offer
+		rematchOffers[match.player1.userId], rematchOffers[match.player2.userId] = offer, offer
+		for _, member in ipairs({match.player1, match.player2}) do
+			local _, opponent = getParticipant(match, member.userId)
+			fireMatchEvent(member.player, {action="result", matchId=match.id, mode=match.mode, level=match.level,
+				isDraw=true, isWinner=false, timedOut=true, rematchAvailable=true, duration=match.timeLimit,
+				theme=match.puzzleData.title or "Strands", wordCount=match.boardInfo.wordCount,
+				foundCount=member.foundCount, score=member.score, xpEarned=member.xpEarned, myXP=member.xpEarned,
+				myPuzzlePieces=0, myStars=0, myDuelStats=participantDuelStats(member), opponentDuelStats=participantDuelStats(opponent)})
+		end
+		task.delay(RESULT_CLEANUP_DELAY, function() cleanupMatch(matchId) end)
+		return
+	end
 	local winnerId = match.winner
 	local participant1 = match.player1
 	local participant2 = match.player2
@@ -321,7 +340,7 @@ local function completeMatch(matchId, quitterId)
 			participant.duelStats[key] += 1
 		end
 	end
-	local duration = match.startTime and math.max(0, os.clock() - match.startTime) or 0
+	local duration = match.timedOut and match.timeLimit or (match.startTime and math.max(0, os.clock() - match.startTime) or 0)
 	local opponentQuit = type(quitterId) == "number"
 	if not opponentQuit then
 		local offer = {match=match, votes={}}
@@ -362,9 +381,9 @@ local function completeMatch(matchId, quitterId)
 		winnerName = winner and winner.displayName or "Winner",
 		loserName = loser and loser.displayName or "Loser",
 		duration = math.floor(duration * 10) / 10,
-		opponentQuit = opponentQuit,
+		opponentQuit = opponentQuit, timedOut = match.timedOut == true,
 		rematchAvailable = not opponentQuit,
-		theme = match.puzzleData.title or "Word Search",
+		theme = match.puzzleData.title or "Strands",
 		wordCount = match.boardInfo.wordCount,
 	}
 
@@ -372,6 +391,7 @@ local function completeMatch(matchId, quitterId)
 		local winnerPayload = table.clone(resultPayload)
 		winnerPayload.myDuelStats, winnerPayload.opponentDuelStats = participantDuelStats(winner), participantDuelStats(loser)
 		winnerPayload.isWinner = true
+		winnerPayload.score = winner.score
 		winnerPayload.xpEarned = winner.xpEarned
 		winnerPayload.myXP = winner.xpEarned
 		winnerPayload.foundCount = winner.foundCount
@@ -383,6 +403,7 @@ local function completeMatch(matchId, quitterId)
 		local loserPayload = table.clone(resultPayload)
 		loserPayload.myDuelStats, loserPayload.opponentDuelStats = participantDuelStats(loser), participantDuelStats(winner)
 		loserPayload.isWinner = false
+		loserPayload.score = loser.score
 		loserPayload.xpEarned = loser.xpEarned
 		loserPayload.myXP = loser.xpEarned
 		loserPayload.foundCount = loser.foundCount
@@ -395,6 +416,17 @@ local function completeMatch(matchId, quitterId)
 	task.delay(RESULT_CLEANUP_DELAY, function()
 		cleanupMatch(matchId)
 	end)
+end
+
+local function expireMatch(match)
+	if not match or match.state ~= "active" or not match.endsAt or os.clock() < match.endsAt then return false end
+	match.timedOut = true
+	if match.player1.foundCount ~= match.player2.foundCount then
+		match.winner = match.player1.foundCount > match.player2.foundCount and match.player1.userId or match.player2.userId
+	end
+	broadcastProgress(match)
+	completeMatch(match.id)
+	return true
 end
 
 local function createMatch(player1, player2, modeName, botMember, admissionValid)
@@ -435,6 +467,7 @@ local function createMatch(player1, player2, modeName, botMember, admissionValid
 			foundWords = {},
 			hintedWords = {},
 			foundCount = 0,
+			score = 0,
 			xpEarned = 0,
 			hintUses = 0,
 			lastWordFoundAt = -math.huge,
@@ -451,6 +484,7 @@ local function createMatch(player1, player2, modeName, botMember, admissionValid
 			foundWords = {},
 			hintedWords = {},
 			foundCount = 0,
+			score = 0,
 			xpEarned = 0,
 			hintUses = 0,
 			lastWordFoundAt = -math.huge,
@@ -466,6 +500,7 @@ local function createMatch(player1, player2, modeName, botMember, admissionValid
 end
 
 local function startMatch(match)
+	match.timeLimit = GameConfig.RoundSeconds.Duel
 	for _, recipient in ipairs({ match.player1, match.player2 }) do
 		local _, opponent = getParticipant(match, recipient.userId)
 		fireMatchEvent(recipient.player, {
@@ -473,15 +508,16 @@ local function startMatch(match)
 			opponentName = opponent.displayName, opponentIsBot = opponent.isBot == true,
 			opponentThumbnailImage = opponent.thumbnailImage,
 			myDuelStats = participantDuelStats(recipient), opponentDuelStats = participantDuelStats(opponent),
-			mode = match.mode, level = match.level, countdownTime = COUNTDOWN_TIME, puzzleData = match.puzzleData,
+			mode = match.mode, level = match.level, countdownTime = COUNTDOWN_TIME, puzzleData = match.puzzleData, timeLimit = match.timeLimit,
 		})
 	end
 	task.delay(MATCH_START_DELAY, function()
 		if activeMatches[match.id] ~= match or match.state ~= "countdown" then return end
 		match.state, match.startTime = "active", os.clock()
+		match.endsAt, match.expiresAt = match.startTime + match.timeLimit, Workspace:GetServerTimeNow() + match.timeLimit
 		if match.player2.isBot then bots:StartMatch(match) end
-		fireMatchEvent(match.player1.player, { action = "start", matchId = match.id })
-		fireMatchEvent(match.player2.player, { action = "start", matchId = match.id })
+		fireMatchEvent(match.player1.player, { action = "start", matchId = match.id, expiresAt = match.expiresAt, timeLimit = match.timeLimit })
+		fireMatchEvent(match.player2.player, { action = "start", matchId = match.id, expiresAt = match.expiresAt, timeLimit = match.timeLimit })
 		broadcastProgress(match)
 	end)
 end
@@ -820,7 +856,7 @@ function DuelService:ReportProgress(player, payload)
 
 	local matchId = playerMatches[player.UserId]
 	local match = matchId and activeMatches[matchId] or nil
-	if not match or match.state ~= "active" then
+	if not match or match.state ~= "active" or expireMatch(match) then
 		return
 	end
 
@@ -831,6 +867,17 @@ function DuelService:ReportProgress(player, payload)
 	local now = os.clock()
 
 	local word = normalizeWord(payload.word)
+	if match.puzzleData.rules == "Strands" and not PuzzleValidator.ValidateStrand(match.puzzleData, payload.path, word) then
+		local bonus = PuzzleValidator.ReadBonusWord(match.puzzleData, payload.path)
+		if activeMatches[match.id] ~= match or match.state ~= "active" or expireMatch(match) or playerMatches[player.UserId] ~= match.id then return end
+		participant.bonusWords = participant.bonusWords or {}
+		if not bonus or participant.foundWords[bonus] or participant.bonusWords[bonus]
+			or now - (participant.lastWordFoundAt or -math.huge) < MIN_DUEL_WORD_FOUND_INTERVAL then return end
+		participant.lastWordFoundAt = now
+		participant.bonusWords[bonus] = true
+		broadcastProgress(match)
+		return
+	end
 	if word and match.boardInfo.wordLookup[word] and not participant.foundWords[word] then
 		local expectedPath = match.puzzleData
 			and match.puzzleData.placedWordsByWord
@@ -839,17 +886,22 @@ function DuelService:ReportProgress(player, payload)
 		if now - (participant.lastWordFoundAt or -math.huge) < MIN_DUEL_WORD_FOUND_INTERVAL then
 			return
 		end
-		if not pathsMatch(expectedPath, payload.path) then
+		local legalPath = match.puzzleData.rules == "Strands"
+			and PuzzleValidator.ValidateStrand(match.puzzleData, payload.path, word)
+			or (match.puzzleData.rules ~= "Strands" and pathsMatch(expectedPath, payload.path))
+		if not legalPath then
 			return
 		end
 
 		participant.lastWordFoundAt = now
 		participant.foundWords[word] = true
 		participant.foundCount += 1
+		participant.score += ProgressionConfig.Score.Word(word, participant.hintedWords[word] == true)
 		DataService.RecordWordFound(DataService.GetMutableData(player))
 		local earnedXp = #word * ProgressionConfig.Experience.PerLetter
 		if participant.foundCount == match.boardInfo.wordCount then
 			earnedXp += ProgressionConfig.Experience.CompletionBonus
+			participant.score += ProgressionConfig.Score.Completion(os.clock() - match.startTime, match.timeLimit)
 		end
 		DataService.AddExperience(player, earnedXp)
 		participant.xpEarned += earnedXp
@@ -879,7 +931,7 @@ end
 function DuelService:ReportCompletion(player)
 	local matchId = playerMatches[player.UserId]
 	local match = matchId and activeMatches[matchId] or nil
-	if not match or match.state ~= "active" then
+	if not match or match.state ~= "active" or expireMatch(match) then
 		return
 	end
 
@@ -904,7 +956,7 @@ end
 function DuelService:UseHint(player, claimedWord)
 	local matchId = playerMatches[player.UserId]
 	local match = matchId and activeMatches[matchId] or nil
-	if not match or match.state ~= "active" then
+	if not match or match.state ~= "active" or expireMatch(match) then
 		return {
 			success = false,
 			accepted = false,
@@ -1091,6 +1143,7 @@ function DuelService.Init(options)
 		for _, offer in pairs(rematchOffers) do
 			if not rematchEligible(offer) then closeRematch(offer) end
 		end
+		for _, match in pairs(activeMatches) do expireMatch(match) end
 		bots:Step(function(match)
 			if match.state ~= "active" then return end
 			broadcastProgress(match)

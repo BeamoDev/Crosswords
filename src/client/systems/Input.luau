@@ -18,7 +18,13 @@ function Input.bind(board, onPause)
 		if processed or UserInputService:GetFocusedTextBox() or not board:Interactive() then return end
 		local selected = GuiService.SelectedObject
 		if selected and not selected:IsDescendantOf(board.grid) then return end
+		local dpad = input.KeyCode == Enum.KeyCode.DPadLeft or input.KeyCode == Enum.KeyCode.DPadRight
+			or input.KeyCode == Enum.KeyCode.DPadUp or input.KeyCode == Enum.KeyCode.DPadDown
+		-- Native selection owns navigation once the user has selected a button.
+		if dpad and selected then return end
 		local directions = {
+			[Enum.KeyCode.DPadLeft] = {0, -1}, [Enum.KeyCode.DPadRight] = {0, 1},
+			[Enum.KeyCode.DPadUp] = {-1, 0}, [Enum.KeyCode.DPadDown] = {1, 0},
 			[Enum.KeyCode.Left] = { 0, -1 }, [Enum.KeyCode.Right] = { 0, 1 },
 			[Enum.KeyCode.Up] = { -1, 0 }, [Enum.KeyCode.Down] = { 1, 0 },
 			[Enum.KeyCode.A] = { 0, -1 }, [Enum.KeyCode.D] = { 0, 1 },
@@ -26,7 +32,8 @@ function Input.bind(board, onPause)
 		}
 		local direction = directions[input.KeyCode]
 		if direction then board:KeyboardMove(direction[1], direction[2])
-		elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.Space then
+		elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.Space
+			or (input.KeyCode == Enum.KeyCode.ButtonA and not selected) then
 			board:ActivateCell(board.cursor or { row = 1, column = 1 })
 		end
 	end)

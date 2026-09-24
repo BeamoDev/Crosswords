@@ -16,7 +16,7 @@ local GuiUtils = Interface.Components.Gui
 local DEFAULT_META_CONFIG = {
 	GROUP = {
 		Id = 34241464,
-		RewardHints = 2,
+		RewardHints = 1,
 		RewardXp = 0,
 	},
 	DEFAULTS = {
@@ -27,6 +27,7 @@ local DEFAULT_META_CONFIG = {
 			DuelInvites = true,
 		},
 	},
+	DIRECT_HINT_PRODUCT = { Id = 3714515983, Amount = 1 },
 	HINT_PRODUCT_IDS = {
 		[1] = 3573028208,
 		[5] = 3573028342,
@@ -37,7 +38,7 @@ local DEFAULT_META_CONFIG = {
 		BaseXp = 60,
 		StepXp = 20,
 		MaxXp = 180,
-		HintEvery = 5,
+		HintEvery = 0,
 		HintAmount = 1,
 	},
 
@@ -490,8 +491,7 @@ function ProgressionController.new(ctx)
 	self.leaderboardCategory = "WordsFound"
 	self.verifyPromptShownThisSession = false
 	self.verifyPromptQueued = false
-	self.attemptedGroupInfoLookup = false
-	self.cachedGroupInfo = nil
+	self.verifyPromptToken = 0
 	self.groupJoinPollToken = 0
 	self.groupClaimRequestPending = false
 	self.groupJoinPromptPending = false
@@ -673,23 +673,11 @@ function ProgressionController:isPlayerInGroup()
 	return success and inGroup == true
 end
 
-function ProgressionController:getVerifiedGroupInfo()
-	if self.attemptedGroupInfoLookup then
-		return self.cachedGroupInfo
-	end
-
-	self.attemptedGroupInfoLookup = true
-	local success, info = pcall(function()
-		return GroupService:GetGroupInfoAsync(MetaConfig.GROUP.Id)
-	end)
-	if success and type(info) == "table" then
-		self.cachedGroupInfo = info
-	end
-
-	return self.cachedGroupInfo
-end
-
 function ProgressionController:hasClaimedGroupReward()
+	local snapshot = self.ctx.getSnapshot and self.ctx.getSnapshot()
+	if snapshot and snapshot.account and type(snapshot.account.groupRewardClaimed) == "boolean" then
+		return snapshot.account.groupRewardClaimed
+	end
 	local account = getDataFolders().account
 	return getBoolValue(account, "GroupRewardClaimed", false)
 end
@@ -720,31 +708,33 @@ function ProgressionController:startGroupJoinVerificationPoll()
 	end)
 end
 
-function ProgressionController:shouldAutoShowVerifyPrompt(snapshot, requireCompletedCount)
+function ProgressionController:isVerifyPromptTestUser()
+	return self.ctx.isVerifyPromptTestUser and self.ctx.isVerifyPromptTestUser() == true
+end
+
+function ProgressionController:shouldAutoShowVerifyPrompt(snapshot)
 	if self.verifyPromptShownThisSession or self.verifyPromptQueued then
 		return false
 	end
 	if not (self.elements and self.elements.verifyFrame) then
 		return false
 	end
-	if self:isPlayerInGroup() then
+	if not (snapshot and snapshot.tutorial and snapshot.tutorial.completed == true) then
 		return false
 	end
-	if not self:getVerifiedGroupInfo() then
-		return false
+	if not self:isVerifyPromptTestUser() then
+		if (tonumber(snapshot.progression and snapshot.progression.solves) or 0) < 1 then return false end
+		if self.ctx.hasCompletedFirstPuzzle and not self.ctx.hasCompletedFirstPuzzle() then return false end
 	end
-	if self:hasClaimedGroupReward() then
+	if not self:isVerifyPromptTestUser() and (self:isPlayerInGroup() or self:hasClaimedGroupReward()) then
 		return false
-	end
-	if requireCompletedCount == true then
-		local boardsCleared = snapshot and snapshot.progression and snapshot.progression.solves or 0
-		return math.max(0, math.floor(tonumber(boardsCleared) or 0)) >= 1
 	end
 
 	return true
 end
 
 function ProgressionController:canShowVerifyPromptNow()
+	if self.ctx.canShowVerifyPrompt then return self.ctx.canShowVerifyPrompt() == true end
 	if self.ctx and self.ctx.isTutorialActive and self.ctx.isTutorialActive() then
 		return false
 	end
@@ -1047,6 +1037,7 @@ function ProgressionController:resolveElements(root)
 		leaderboardTemplate = leaderboardAssets and leaderboardAssets:FindFirstChild("LeaderboardTemplate"),
 		leaderboardYou = leaderboardRoot and leaderboardRoot:FindFirstChild("You"),
 		leaderboardPanels = {
+			Level = leaderboardRoot and leaderboardRoot:FindFirstChild("Level") or nil,
 			WordsFound = leaderboardRoot and leaderboardRoot:FindFirstChild("WordsFound") or nil,
 			["1v1Wins"] = leaderboardRoot and leaderboardRoot:FindFirstChild("1v1Wins") or nil,
 		},
@@ -1264,9 +1255,8 @@ end
 function ProgressionController:updateGameOutcome(snapshot)
 	local result, frame = self.gameOutcomeResult, self.elements.gameOutcome
 	if not result or not frame then return end
-	setText(frame:FindFirstChild("Title"), "Complete!")
-	local modeTitle = result.mode == "Standard" and "Themes" or result.mode
-	setText(frame:FindFirstChild("LevelTheme"), string.format("%s | %s", result.theme or "Word Search", modeTitle or "Themes"))
+	setText(frame:FindFirstChild("Title"), result.timedOut and "Time's up!" or result.failed and "Wrong word!" or "Complete!")
+	setText(frame:FindFirstChild("LevelTheme"), "Theme: " .. (result.theme or "Unknown"))
 	if Interface.UpdateOutcome(frame, snapshot and snapshot.progression) then return end
 	setText(frame:FindFirstChild("Words"), Interface.OutcomeWords(result.words, result.total, result.duration))
 	setText(frame:FindFirstChild("XPWon"), string.format("+%d XP", result.xpEarned))
@@ -1407,13 +1397,13 @@ local LEADERBOARD_MEDALS = {
 }
 
 function ProgressionController:selectLeaderboard(category)
-	if category ~= "WordsFound" and category ~= "1v1Wins" then return end
+	if category ~= "WordsFound" and category ~= "1v1Wins" and category ~= "Level" then return end
 	self.leaderboardCategory = category
 	self:renderLeaderboard()
 end
 
 function ProgressionController:applyLeaderboardUpdate(category, entries, revision, personal)
-	if category ~= "WordsFound" and category ~= "1v1Wins" then return end
+	if category ~= "WordsFound" and category ~= "1v1Wins" and category ~= "Level" then return end
 	if type(entries) ~= "table" or type(revision) ~= "number" then return end
 	if revision <= (self.leaderboardRevisions[category] or -1) then return end
 	self.leaderboardRevisions[category] = revision
@@ -1428,7 +1418,12 @@ function ProgressionController:renderLeaderboard()
 		local snapshot = self.ctx.getSnapshot and self.ctx.getSnapshot()
 		local progression = snapshot and snapshot.progression
 		local personal = self.leaderboardPersonal[self.leaderboardCategory]
-		local score = progression and (self.leaderboardCategory == "1v1Wins" and (progression.duel or {}).wins or progression.wordsFound)
+		local score
+		if progression then
+			if self.leaderboardCategory == "Level" then score = progression.level
+			elseif self.leaderboardCategory == "1v1Wins" then score = (progression.duel or {}).wins
+			else score = progression.wordsFound end
+		end
 		score = score or (personal and personal.Score) or 0
 		you.Visible = true
 		setText(you:FindFirstChild("Username"), player.Name)
@@ -1514,13 +1509,22 @@ function ProgressionController:promptProductPurchase(productId)
 		return
 	end
 
-	pcall(function()
+	local ok = pcall(function()
 		MarketplaceService:PromptProductPurchase(player, productId)
 	end)
+	return ok
+end
+
+function ProgressionController:promptHintPurchase()
+	if self.hintPurchasePending then return end
+	self.hintPurchasePending = true
+	if not self:promptProductPurchase(MetaConfig.DIRECT_HINT_PRODUCT.Id) then
+		self.hintPurchasePending = false
+	end
 end
 
 function ProgressionController:handleHintPurchase(amount)
-	-- The single-hint product is prompted only by Game.Hint at zero inventory.
+	-- Optional legacy shop cards retain their previous product bindings.
 	if amount ~= 5 and amount ~= 15 and amount ~= 30 then return end
 	self:promptProductPurchase(HINT_PRODUCT_IDS[amount])
 end
@@ -1596,7 +1600,7 @@ function ProgressionController:connectButtons()
 		self:hideFrame(elements.statsFrame)
 	end)
 	for _, panel in pairs(elements.leaderboardPanels or {}) do
-		for _, category in ipairs({ "WordsFound", "1v1Wins" }) do
+		for _, category in ipairs({ "WordsFound", "1v1Wins", "Level" }) do
 			self:connectButton(findButtonLike(panel:FindFirstChild(category)), function()
 				self:selectLeaderboard(category)
 			end)
@@ -1654,10 +1658,12 @@ function ProgressionController:connectRemoteEvents()
 			end
 
 			self.groupClaimRequestPending = false
-			self.verifyPromptQueued = false
-			self.verifyPromptShownThisSession = true
 			self.groupJoinPollToken += 1
-			self:hideFrame(self.elements.verifyFrame)
+			if not self:isVerifyPromptTestUser() or self.verifyPromptShownThisSession then
+				self.verifyPromptQueued = false
+				self.verifyPromptToken += 1
+				self:hideFrame(self.elements.verifyFrame)
+			end
 		end))
 	end
 
@@ -1667,19 +1673,22 @@ function ProgressionController:connectRemoteEvents()
 		end))
 	end
 
-	table.insert(self.connections, MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, _, purchased)
+	table.insert(self.connections, MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, purchased)
 		if userId ~= player.UserId then
 			return
 		end
 
+		if productId == MetaConfig.DIRECT_HINT_PRODUCT.Id then self.hintPurchasePending = false end
+		-- Closing a prompt never grants inventory; only ProcessReceipt does that.
 		if purchased then
 			self:updateShopTexts(self.ctx.getSnapshot and self.ctx.getSnapshot() or nil)
 		end
 	end))
 end
 
-function ProgressionController:queueVerifyPrompt(snapshot, delaySeconds, requireCompletedCount)
-	if self:isPlayerInGroup() and not self:hasClaimedGroupReward() then
+function ProgressionController:queueVerifyPrompt(snapshot, delaySeconds)
+	if not self.root then return end
+	if not self:isVerifyPromptTestUser() and self:isPlayerInGroup() and not self:hasClaimedGroupReward() then
 		if self.remotes.playerJoinedGroup and self.groupClaimRequestPending ~= true then
 			self.groupClaimRequestPending = true
 			self.remotes.playerJoinedGroup:FireServer()
@@ -1687,19 +1696,18 @@ function ProgressionController:queueVerifyPrompt(snapshot, delaySeconds, require
 		return
 	end
 
-	if not self:shouldAutoShowVerifyPrompt(snapshot, requireCompletedCount == true) then
+	if not self:shouldAutoShowVerifyPrompt(snapshot) then
 		return
 	end
 
 	self.verifyPromptQueued = true
+	self.verifyPromptToken += 1
+	local token, root = self.verifyPromptToken, self.root
 	task.delay(math.max(0, tonumber(delaySeconds) or 1.2), function()
 		local success, err = xpcall(function()
-			while self.verifyPromptQueued do
-				if self.verifyPromptShownThisSession or self:isPlayerInGroup() then
-					self.verifyPromptQueued = false
-					return
-				end
-				if self:hasClaimedGroupReward() then
+			while token == self.verifyPromptToken and self.root == root and root.Parent and self.verifyPromptQueued do
+				if self.verifyPromptShownThisSession or (not self:isVerifyPromptTestUser()
+					and (self:isPlayerInGroup() or self:hasClaimedGroupReward())) then
 					self.verifyPromptQueued = false
 					return
 				end
@@ -1708,14 +1716,16 @@ function ProgressionController:queueVerifyPrompt(snapshot, delaySeconds, require
 					return
 				end
 				if not self:canShowVerifyPromptNow() then
-					task.wait(1)
-					continue
+					self.verifyPromptQueued = false
+					self:queueVerifyPrompt(self.ctx.getSnapshot and self.ctx.getSnapshot() or snapshot, 1)
+					return
 				end
 				self.verifyPromptQueued = false
 				break
 			end
 
-			if self.verifyPromptShownThisSession or self.verifyPromptQueued then
+			if token ~= self.verifyPromptToken or self.root ~= root or not root.Parent
+				or self.verifyPromptShownThisSession or self.verifyPromptQueued then
 				return
 			end
 
@@ -1723,7 +1733,7 @@ function ProgressionController:queueVerifyPrompt(snapshot, delaySeconds, require
 			self:showFrame(self.elements.verifyFrame)
 		end, debug.traceback)
 		if not success then
-			self.verifyPromptQueued = false
+			if token == self.verifyPromptToken then self.verifyPromptQueued = false end
 			warn("[ProgressionController] Verify prompt callback failed:", err)
 		end
 	end)
@@ -1736,7 +1746,7 @@ function ProgressionController:applySnapshot(snapshot)
 	self:updateStats(snapshot)
 	self:updateSettings(snapshot)
 	self:updateGameOutcome(snapshot)
-	self:queueVerifyPrompt(snapshot, nil, true)
+	self:queueVerifyPrompt(snapshot)
 end
 
 function ProgressionController:bind(root)
@@ -1770,6 +1780,7 @@ function ProgressionController:bind(root)
 end
 
 function ProgressionController:destroy()
+	self.hintPurchasePending = false
 	Interface.CancelOutcome(self.elements.gameOutcome)
 	disconnectAllConnections(self.modalConnections)
 	for frame, connection in pairs(self.modalVisibilityConnections) do
@@ -1791,6 +1802,7 @@ function ProgressionController:destroy()
 	self.dailyRefreshing, self.dailyClaimPending = false, false
 	self.dailyNextRefreshAt = 0
 	self.verifyPromptQueued = false
+	self.verifyPromptToken += 1
 	self.groupJoinPollToken += 1
 	disconnectAllConnections(self.connections)
 	disconnectAllConnections(self.frameConnections)

@@ -41,10 +41,13 @@ function DataSchema.Normalize(data, currentDay)
 	if oldVersion < 17 then
 		local total = integer(progress.totalXp)
 		if oldVersion < 13 then
-			local oldLevel = 1 + math.floor(total / 500)
-			total = Experience.TotalForLevel(oldLevel) + math.floor((total % 500) / 500 * Experience.RequiredForLevel(oldLevel))
+			level = 1 + math.floor(total / 500)
+			xp = math.floor((total % 500) / 500 * (500 + (level - 1) * 100))
+		else
+			local completed = math.floor((math.sqrt(900 * 900 + 800 * total) - 900) / 200)
+			level = completed + 1
+			xp = total - (completed * 500 + 100 * completed * (completed - 1) / 2)
 		end
-		level, xp = Experience.Resolve(total)
 		local results = object(stats.modeResults)
 		clean.progression.solves = math.max(integer(stats.boardsCleared), integer(object(results.Total).wins))
 		clean.progression.duel = { wins = integer(object(results.Duel).wins), losses = integer(object(results.Duel).losses) }

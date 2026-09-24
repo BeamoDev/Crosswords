@@ -2,7 +2,7 @@ local Meta = {}
 
 Meta.GROUP = {
 	Id = 34241464,
-	RewardHints = 2,
+	RewardHints = 1,
 	RewardXp = 0,
 }
 
@@ -15,6 +15,9 @@ Meta.DEFAULTS = {
 	},
 }
 
+Meta.DIRECT_HINT_PRODUCT = { Id = 3714515983, Amount = 1 }
+
+-- Keep earlier product grants available for delayed receipts.
 Meta.HINT_PRODUCT_IDS = {
 	[1] = 3573028208,
 	[5] = 3573028342,
@@ -26,7 +29,7 @@ Meta.DAILY_REWARD = {
 	BaseXp = 0,
 	StepXp = 0,
 	MaxXp = 0,
-	HintEvery = 1,
+	HintEvery = 0, -- No extra streak hint; each daily claim grants HintAmount.
 	HintAmount = 1,
 }
 
@@ -35,6 +38,7 @@ Meta.GIFT = {
 }
 
 Meta.LEADERBOARD = {
+	LevelStoreName = "WordHuntQueueLevels_v1",
 	WordsFoundStoreName = "WordHuntQueueWordsFound_v1",
 	DuelWinsStoreName = "WordHuntQueueDuelWins_v1",
 	RefreshInterval = 300,
@@ -152,6 +156,7 @@ return {
 	Meta = Meta,
 	Economy = Economy,
 	Bots = { Enabled = true, ServerSize = 12, MinBots = 2 },
+	RoundSeconds = { Standard = 180, Mini = 90, Jumbo = 300, Hardcore = 180, Duel = 180, Timed = 180, Tutorial = 180 },
 	Tutorial = {
 		-- Everyone respects saved completion/Skip except this owner testing account.
 		ReplayEveryJoin = false,

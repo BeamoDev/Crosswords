@@ -1,4 +1,11 @@
 local PuzzleValidator = {}
+local Engine = if script then require(script.Parent.PuzzleEngine) else require("./PuzzleEngine")
+
+PuzzleValidator.ReadBonusWord = Engine.ReadBonusWord
+
+function PuzzleValidator.ValidateStrand(puzzle, path, word)
+	return type(word) == "string" and #word >= 3 and Engine.MatchesStrand(puzzle, word, path)
+end
 local PuzzleTypes = if script
 	then require(script.Parent:WaitForChild("PuzzleTypes"))
 	else require("./PuzzleTypes")
@@ -68,6 +75,12 @@ end
 function PuzzleValidator.ValidateDefinition(definition: PuzzleDefinition): (boolean, string?)
 	if type(definition) ~= "table" then
 		return false, "definition must be a table"
+	end
+	if definition.rules == "Strands" then
+		local h, w = definition.gridSize, definition.gridWidth
+		local valid = definition.tutorial == true and h == 3 and w == 3
+			or (h == w and (h == 5 or h == 7 or h == 8))
+		return valid, valid and nil or "Invalid Strands dimensions"
 	end
 	local gridSize = tonumber(definition.gridSize)
 	if not gridSize or gridSize ~= math.floor(gridSize) or gridSize < 4 or gridSize > 32 then

@@ -33,7 +33,7 @@ NetworkContract.Legacy = {
 	GroupHintAwarded = "GroupHintAwarded",
 	UpdateSetting = "UpdateSetting",
 	Rejoin = "RejoinRemote",
-	-- Update: category (WordsFound/1v1Wins), top-20 entries, updatedAt, revision, personal.
+	-- Update: category (WordsFound/1v1Wins/Level), top-20 entries, updatedAt, revision, personal.
 	-- personal: UserId, Username, Score, Rank (when known), RankText (#N / 100+ / --).
 	-- Request: no arguments; sends both cached categories using the retained event names.
 	LeaderboardUpdate = "LeaderboardUpdateSolves",

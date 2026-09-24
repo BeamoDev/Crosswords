@@ -12,7 +12,6 @@ function GameController.Start()
 	local RunService = game:GetService("RunService")
 	local Workspace = game:GetService("Workspace")
 	local SoundService = game:GetService("SoundService")
-	local MarketplaceService = game:GetService("MarketplaceService")
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
 	local hud = playerGui:WaitForChild("Main")
@@ -52,6 +51,7 @@ function GameController.Start()
 		snapshot = {}, profileVersion = -1, queueRevision = -1, roundRevision = -1,
 		ready = false, introComplete = false, queued = false, round = nil, mode = nil, pending = false,
 		duelActive = false, duelStarted = false, ignoredRounds = {}, queue = {}, transitioning = false, roundVisible = false,
+		firstPuzzleCompleted = false,
 	}
 	local board, meta, duel, tutorial
 	local applyRound, applyQueue, maybeStartTutorial, maybeShowOutcome, outcomePlay, outcomeHome
@@ -66,6 +66,7 @@ function GameController.Start()
 		if sound and sound:IsA("Sound") then sound:Play() end
 	end
 	local function modalVisible()
+		if meta and meta.hintPurchasePending then return true end
 		if not ui.frames or (ui.frames:IsA("GuiObject") and not ui.frames.Visible) then return false end
 		for _, frame in ipairs(ui.frames:GetChildren()) do
 			if frame:IsA("GuiObject") and frame.Visible then return true end
@@ -74,7 +75,7 @@ function GameController.Start()
 	end
 	local function canInteract()
 		return hud.Enabled and state.introComplete and state.ready and not state.pending and not state.transitioning and ui.game.Visible and not ui.pause.Visible and not ui.queue.Visible
-			and not modalVisible() and (not tutorial or not tutorial:IsActive() or tutorial:CanUseBoard()) and (state.mode ~= "Duel" or state.duelStarted)
+			and (not board or not board.timeExpired) and not modalVisible() and (not tutorial or not tutorial:IsActive() or tutorial:CanUseBoard()) and (state.mode ~= "Duel" or state.duelStarted)
 	end
 	local function updateModePlay(control, level, requiredLevel)
 		if not control then return end
@@ -211,7 +212,7 @@ function GameController.Start()
 			elseif state.round then
 				invoke({ action = "Word", roundId = state.round.id, word = word, path = path })
 			elseif state.mode == "Duel" and state.duelStarted then
-				duel:reportWordFound(word, 0, board.puzzle.placedWordsByWord[word].path)
+				duel:reportWordFound(word, 0, path)
 			end
 		end,
 	})
@@ -224,7 +225,11 @@ function GameController.Start()
 		for _, member in ipairs(round.members or {}) do
 			if member.userId == player.UserId then mine = member break end
 		end
-		if not mine or not mine.completed or mine.failed then return end
+		if not mine or (not mine.completed and not mine.failed) then return end
+		if mine.completed and (state.roundStartProgression.solves or 0) == 0 then
+			state.firstPuzzleCompleted = true
+			meta:queueVerifyPrompt(state.snapshot)
+		end
 		state.outcomeScheduled = round.id
 		local generation, roundId = presentationVersion, round.id
 		task.delay(0.55, function()
@@ -235,7 +240,7 @@ function GameController.Start()
 			ui.pause.Visible = false
 			board:Cancel()
 			meta:showGameOutcome({ roundId = roundId, mode = round.mode, theme = round.puzzle.title or round.puzzle.subtitle,
-				words = mine.count or #round.puzzle.words, total = #round.puzzle.words, duration = mine.duration, xpEarned = mine.xpEarned or 0, beforeProgression = state.roundStartProgression }, state.snapshot)
+				timedOut = mine.timedOut, failed = mine.failed, words = mine.count or #round.puzzle.words, total = #round.puzzle.words, duration = mine.duration, xpEarned = mine.xpEarned or 0, beforeProgression = state.roundStartProgression }, state.snapshot)
 		end)
 	end
 	local function applyRoundProgress()
@@ -245,7 +250,7 @@ function GameController.Start()
 			if member.userId == player.UserId and member.failed then
 				board.completed = true
 				board:Cancel()
-				ui.subtitle.Text = "Wrong word! Leave to try again."
+				if ui.subtitle then ui.subtitle.Text = member.timedOut and "Time's up!" or "Wrong word!" end
 			end
 		end
 		maybeShowOutcome()
@@ -321,13 +326,20 @@ function GameController.Start()
 		onOutcomeHome = function(id) if outcomeHome then outcomeHome(id) end end,
 		isGameplayInteractionBlocked = function() return state.transitioning or ui.pause.Visible or ui.queue.Visible or tutorialRequired() or (tutorial and tutorial:IsActive()) end,
 		isGameViewActive = function() return ui.game.Visible end,
+		canShowVerifyPrompt = function()
+			return state.ready and state.introComplete and hud.Enabled and ui.home.Visible
+				and not state.pending and not state.transitioning and not ui.queue.Visible and not ui.game.Visible
+				and not ui.pause.Visible and not modalVisible() and not tutorialRequired()
+				and tutorial ~= nil and not tutorial:IsActive()
+		end,
+		isVerifyPromptTestUser = function()
+			return player.UserId == GameConfig.Tutorial.ReplayUserId and tutorial ~= nil and tutorial.finished == true
+		end,
+		hasCompletedFirstPuzzle = function() return state.firstPuzzleCompleted end,
 	})
-	meta.verifyPromptShownThisSession = true
 	meta:bind(hud)
 	hideModals()
 	if ui.frames and ui.frames:IsA("GuiObject") then ui.frames.Visible = true end
-	-- Automatic group prompts are disabled during queued rounds; the existing reward remains claimable.
-	meta.verifyPromptShownThisSession = true
 	local function applyDuelProgress()
 		if not state.roundVisible or state.mode ~= "Duel" then return end
 		board:Progress(state.duelMembers)
@@ -353,7 +365,8 @@ function GameController.Start()
 			state.mode, state.duelActive, state.duelStarted = "Duel", true, false
 			state.roundStartProgression = table.clone(state.snapshot.progression or {})
 			state.duelId, state.opponentId = payload.matchId, payload.opponentId
-			state.duelResultId = nil
+			state.duelResultId, state.duelRemaining = nil, nil
+			state.duelTimer = {timeLimit = payload.timeLimit}
 			state.opponentName = payload.opponentName
 			state.myDuelStats, state.opponentDuelStats = payload.myDuelStats, payload.opponentDuelStats
 			state.duelMembers = {
@@ -374,21 +387,27 @@ function GameController.Start()
 		onStart = function(payload)
 			if state.duelActive and state.duelId == payload.matchId then
 				state.duelStarted = true
+				state.duelTimer = {expiresAt = payload.expiresAt, timeLimit = payload.timeLimit}
 			end
 		end,
 		onProgress = function(payload)
 			if state.mode ~= "Duel" or state.duelId ~= payload.matchId then return end
+			state.duelMembers[1].score = payload.myScore or 0
 			state.duelMembers[1].foundWords = payload.myFoundWords or {}
+			state.duelMembers[1].bonusWords = payload.myBonusWords or {}
 			state.duelMembers[2].foundWords = payload.opponentFoundWords or {}
 			applyDuelProgress()
 		end,
 		onResult = function(payload)
 			if state.duelId ~= payload.matchId or state.duelResultId == payload.matchId then return true end
 			state.duelResultId = payload.matchId
+			if payload.score ~= nil then state.duelMembers[1].score = payload.score end
+			if state.roundVisible then applyDuelProgress() end
 			payload = table.clone(payload)
 			payload.beforeProgression = state.roundStartProgression
 			state.myDuelStats, state.opponentDuelStats = payload.myDuelStats, payload.opponentDuelStats
 			if state.roundVisible then board:DuelWinRates(state.myDuelStats, state.opponentDuelStats) end
+			state.duelRemaining = math.max(0, (state.duelTimer.timeLimit or 0) - (payload.duration or 0))
 			state.duelStarted, state.duelActive = false, false
 			board:Cancel()
 			if payload.isWinner then playSound("Victory") end
@@ -499,7 +518,7 @@ function GameController.Start()
 			returnHomeAnimated()
 		end
 	end
-	ui.exit.Activated:Connect(exitRound)
+	if ui.exit then ui.exit.Activated:Connect(exitRound) end
 	ui.leaveRound.Activated:Connect(exitRound)
 	ui.hint.Activated:Connect(function()
 		if tutorial and tutorial:IsActive() then tutorial:Hint() return end
@@ -512,7 +531,8 @@ function GameController.Start()
 		state.pending = true
 		local hints = state.snapshot.hints or 0
 		if hints < 1 then
-			pcall(MarketplaceService.PromptProductPurchase, MarketplaceService, player, GameConfig.Meta.HINT_PRODUCT_IDS[1])
+			board:Cancel()
+			meta:promptHintPurchase()
 		elseif state.round then
 			invoke({ action = "Hint", roundId = state.round.id })
 		elseif state.mode == "Duel" then
@@ -538,6 +558,7 @@ function GameController.Start()
 		restore = function()
 			applyQueue(state.queue)
 			Interface.UpdateLevelBars(ui, state.snapshot.progression)
+			meta:queueVerifyPrompt(state.snapshot)
 		end,
 	})
 	maybeStartTutorial = function()
@@ -547,11 +568,35 @@ function GameController.Start()
 	queueUpdated.OnClientEvent:Connect(applyQueue)
 	roundUpdated.OnClientEvent:Connect(applyRound)
 	stateUpdated.OnClientEvent:Connect(applySnapshot)
-	RunService.Heartbeat:Connect(function()
+	local hintWobble = Effects.CreateHintWobble(ui.hint)
+	local lastTimer, lastTimerBucket, lastTimerLimit
+	RunService.Heartbeat:Connect(function(dt)
+		Interface.StepHomePreviews(ui, dt, hud.Enabled and ui.home.Visible and not state.transitioning and not modalVisible())
+		hintWobble:Step(dt, canInteract() and not board.entering and not board.completed and not board.startCell)
 		if ui.queue.Visible then
 			local deadline = state.queue.deadline
 			local seconds = deadline and math.max(0, math.ceil(deadline - Workspace:GetServerTimeNow())) or 0
 			Interface.UpdateQueueTimer(ui, seconds)
+		end
+		if ui.game.Visible then
+			if tutorial then tutorial:Tick(Workspace:GetServerTimeNow()) end
+			local timer = state.mode == "Duel" and state.duelTimer or (tutorial and tutorial:IsActive() and tutorial.round or state.round)
+			if timer and timer.expiresAt and timer.timeLimit then
+				local remaining = timer.expiresAt - Workspace:GetServerTimeNow()
+				for _, member in ipairs(timer.members or {}) do
+					if member.userId == player.UserId and (member.completed or member.failed) then remaining = timer.timeLimit - (member.duration or timer.timeLimit) end
+				end
+				if state.mode == "Duel" and state.duelRemaining then remaining = state.duelRemaining end
+				local bucket = math.ceil(math.max(0, remaining) * 5)
+				if timer ~= lastTimer or bucket ~= lastTimerBucket or timer.timeLimit ~= lastTimerLimit then
+					Interface.UpdateTimedTimer(ui, remaining, timer.timeLimit)
+					lastTimer, lastTimerBucket, lastTimerLimit = timer, bucket, timer.timeLimit
+				end
+				board.timeExpired = remaining <= 0
+				if board.timeExpired and board.startCell then board:Cancel() end
+			else
+				Interface.UpdateTimedTimer(ui, timer and timer.timeLimit, timer and timer.timeLimit)
+			end
 		end
 		if board.startCell and not canInteract() then board:Cancel() end
 	end)

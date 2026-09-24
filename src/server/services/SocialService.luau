@@ -9,6 +9,7 @@ local LegacyRemotes = require(sharedFolder:WaitForChild("network"):WaitForChild(
 
 local DEFAULT_META_CONFIG = {
 	LEADERBOARD = {
+		LevelStoreName = "WordHuntQueueLevels_v1",
 		WordsFoundStoreName = "WordHuntQueueWordsFound_v1",
 		DuelWinsStoreName = "WordHuntQueueDuelWins_v1",
 		RefreshInterval = 300,
@@ -23,6 +24,13 @@ local refreshInterval = math.max(60, math.floor(tonumber(MetaConfig.LEADERBOARD.
 local writeInterval = math.max(30, math.floor(tonumber(MetaConfig.LEADERBOARD.WriteInterval) or 60))
 
 local leaderboardDefinitions = {
+	Level = {
+		title = "Level",
+		storeName = MetaConfig.LEADERBOARD.LevelStoreName,
+		getValueFromSnapshot = function(snapshot)
+			return ((snapshot or {}).progression or {}).level or 0
+		end,
+	},
 	WordsFound = {
 		title = "Words Found",
 		storeName = MetaConfig.LEADERBOARD.WordsFoundStoreName,

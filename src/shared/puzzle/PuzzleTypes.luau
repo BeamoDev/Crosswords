@@ -8,12 +8,15 @@ export type Cell = {
 export type DirectionVector = { number }
 
 export type PuzzleDefinition = {
+	rules: string?,
+	tutorial: boolean?,
+	beginner: boolean?,
 	level: number?,
 	title: string?,
 	subtitle: string?,
 	gridSize: number, -- Row count; square definitions can omit gridWidth.
 	gridWidth: number?,
-	words: { string },
+	words: { string }?,
 	directions: { DirectionName | DirectionVector }?,
 	seed: number?,
 	mode: string?,
@@ -25,6 +28,11 @@ export type PlacedWord = {
 }
 
 export type GeneratedPuzzle = {
+	rules: string?,
+	clue: string?,
+	theme: string?,
+	spangram: string?,
+	tutorial: boolean?,
 	level: number?,
 	seed: number?,
 	mode: string?,

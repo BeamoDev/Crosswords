@@ -82,9 +82,10 @@ end
 local Experience = {
 	PerLetter = 20,
 	CompletionBonus = 120,
-	BaseLevelXp = 500,
-	LevelXpIncrease = 100,
+	BaseLevelXp = 1000,
+	LevelXpIncrease = 200,
 	LevelCount = 500,
+	HintEvery = 2,
 	ModeLevels = { Mini = 5, Jumbo = 10, Hardcore = 20 },
 }
 
@@ -97,8 +98,8 @@ for level = 1, Experience.LevelCount do
 		level = level,
 		totalXp = completed * Experience.BaseLevelXp + Experience.LevelXpIncrease * completed * (completed - 1) / 2,
 		xpToNextLevel = Experience.BaseLevelXp + completed * Experience.LevelXpIncrease,
-		rewardHints = level == 1 and 0 or (level % 2 == 0 and 2 or 1),
-		totalRewardHints = completed + math.floor(level / 2),
+		rewardHints = level % Experience.HintEvery == 0 and 1 or 0,
+		totalRewardHints = math.floor(level / Experience.HintEvery),
 	})
 end
 table.freeze(Experience.Levels)
@@ -140,17 +141,31 @@ function Experience.HintsForLevel(level)
 	local definition = Experience.Levels[reached]
 	if definition then return definition.rewardHints end
 	if reached == 1 then return 0 end
-	return reached % 2 == 0 and 2 or 1
+	return reached % Experience.HintEvery == 0 and 1 or 0
 end
 
 function Experience.TotalHintRewards(level)
 	local reached = math.max(1, experienceInt(level))
 	local definition = Experience.Levels[reached]
 	if definition then return definition.totalRewardHints end
-	return reached - 1 + math.floor(reached / 2)
+	return math.floor(reached / Experience.HintEvery)
+end
+
+-- Session-only puzzle performance; unrelated to persistent XP and hint rewards.
+local Score = { PerLetter = 100, HintMultiplier = 0.5, CompletionMaximum = 1000, PerLevel = 500 }
+function Score.Word(word, hinted)
+	return math.floor(#word * Score.PerLetter * (hinted and Score.HintMultiplier or 1))
+end
+function Score.Completion(duration, timeLimit)
+	if type(duration) ~= "number" or duration ~= duration or type(timeLimit) ~= "number" or timeLimit <= 0 then return 0 end
+	return math.floor(Score.CompletionMaximum * math.clamp(1 - duration / timeLimit, 0, 1))
+end
+function Score.Level(points)
+	return 1 + math.floor(experienceInt(points) / Score.PerLevel)
 end
 
 return {
 	Experience = Experience,
+	Score = Score,
 	Gift = Gift,
 }

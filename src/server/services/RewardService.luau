@@ -67,7 +67,8 @@ local function getDailyRewardForStreak(streak)
 	local config = MetaConfig.DAILY_REWARD
 	local xp = 0
 	local hints = math.max(1, clampInt(config.HintAmount, 1))
-	if streak > 0 and streak % math.max(1, clampInt(config.HintEvery, 1)) == 0 then
+	local bonusEvery = clampInt(config.HintEvery)
+	if bonusEvery > 0 and streak > 0 and streak % bonusEvery == 0 then
 		hints += 1
 	end
 	return {
@@ -369,7 +370,8 @@ function RewardService.GrantProductPurchase(player, productId, receiptId)
 		}
 	end
 
-	local hintAmount = nil
+	local directHintProduct = MetaConfig.DIRECT_HINT_PRODUCT
+	local hintAmount = directHintProduct and productId == directHintProduct.Id and directHintProduct.Amount or nil
 	for count, id in pairs(MetaConfig.HINT_PRODUCT_IDS) do
 		if id == productId then
 			hintAmount = count

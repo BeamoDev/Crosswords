@@ -60,20 +60,17 @@ function PuzzleTests.Run()
 	end
 
 	local firstDefinition = PuzzleGenerator.BuildTutorialDefinition(12345)
-	equal(firstDefinition.gridSize, 4, "Board 1 grid size changed")
-	equal(#firstDefinition.words, 2, "Board 1 word count changed")
-	equal(firstDefinition.words[1], "CAT", "Board 1 first word changed")
-	equal(firstDefinition.words[2], "DOG", "Board 1 second word changed")
-	equal(#firstDefinition.directions, 1, "Board 1 direction count changed")
-	equal(firstDefinition.directions[1], "E", "Board 1 direction changed")
+	equal(firstDefinition.gridSize, 3, "Practice has three rows")
+	equal(firstDefinition.gridWidth, 3, "Practice has three columns")
+	equal(firstDefinition.rules, "Strands", "Practice uses bending paths")
 
 	local definitionValid, definitionError = PuzzleValidator.ValidateDefinition(firstDefinition)
 	check(definitionValid, definitionError or "Board 1 definition should validate")
 
 	local generated = PuzzleGenerator.generate(firstDefinition, 12345)
-	equal(#generated.letters, 4, "Generated Board 1 row count changed")
-	equal(#generated.letters[1], 4, "Generated Board 1 column count changed")
-	equal(#generated.placedWords, 2, "Generated Board 1 placement count changed")
+	equal(#generated.letters, 3, "Generated Board 1 row count changed")
+	equal(#generated.letters[1], 3, "Generated Board 1 column count changed")
+	equal(#generated.placedWords, 3, "Generated Board 1 placement count changed")
 
 	local diagonal = PuzzleEngine.GetLineSequence(1, 1, 3, 3)
 	check(diagonal ~= nil, "Valid diagonal selection was rejected")

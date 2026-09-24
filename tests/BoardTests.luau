@@ -141,6 +141,7 @@ local services = { Players = players, ReplicatedStorage = storage, GuiService = 
 local environment = {
 	game = { GetService = function(_, name) return services[name] end },
 	require = function(value) return value end,
+	Font = { new = function(family, weight, style) return { Family = family, Weight = weight, Style = style } end },
 	Instance = { new = instance }, Vector2 = rbx.Vector2, Vector3 = rbx.Vector3, UDim2 = rbx.UDim2, UDim = rbx.UDim, Color3 = rbx.Color3,
 	Random = { new = function()
 		local index = 0
@@ -150,7 +151,7 @@ local environment = {
 			return minimum + (maximum - minimum) * ((index * 0.61803398875) % 1)
 		end }
 	end },
-	Enum = rbx.Enum, task = { spawn = function(fn) fn() end, delay = delay },
+	ColorSequence = rbx.ColorSequence, Enum = rbx.Enum, task = { spawn = function(fn) fn() end, delay = delay },
 	TweenInfo = { new = function(time, style, direction, repeats, reverses, delayTime) return { Time = time, DelayTime = delayTime or 0, RepeatCount = repeats, Reverses = reverses } end },
 }
 shared.ui.UIEffects = luau.load(fs.readFile("src/shared/ui/UIEffects.luau"), { environment = environment })()
@@ -158,6 +159,7 @@ local Board = luau.load(fs.readFile("src/client/controllers/BoardController.luau
 local ui = { game = instance("Frame"), screenGui = { IgnoreGuiInset = true }, boardPanel = instance("Frame"),
 	wordPanel = instance("Frame"), words = instance("TextLabel"), wordList = instance("ScrollingFrame"),
 	title = instance("TextLabel"), subtitle = instance("TextLabel"), duel = instance("Frame"), timed = instance("Frame") }
+ui.timed.Position = rbx.UDim2.new(0.47, 8, 0.11, -3)
 local allowed, submissions, sounds = true, {}, {}
 local board = Board.new(ui, {
 	canInteract = function() return allowed end, playSound = function(name) table.insert(sounds, name) end,
@@ -273,6 +275,7 @@ allowed = true
 local square = table.clone(puzzle)
 square.letters = { { "C", "A", "T" }, { "D", "O", "G" }, { "X", "Y", "Z" } }
 board:Build(square, "Duel")
+check(ui.timed.Position == rbx.UDim2.fromScale(0.5,0.03), "Duel positions TimedMode at top center with zero offsets")
 check(board:PortraitColor(1) ~= ownPortraitColor, "New round chooses a new portrait color")
 check(ui.boardPanel:FindFirstChildOfClass("UIAspectRatioConstraint").AspectRatio == 1, "Square aspect")
 check(ui.boardPanel.Position == rbx.UDim2.fromScale(0.387, 0.5) and ui.wordPanel.Position == rbx.UDim2.fromScale(0.667, 0.5), "Square positions")
@@ -331,6 +334,7 @@ board:Finish()
 check(#submissions == inputCount and #sounds == wrongSounds + 1 and sounds[#sounds] == "Error2", "Wrong word plays Error2 without submitting")
 check(countChildren(board.grid, "WrongWordFeedback") == 1, "Wrong selection retains a red shaking line")
 check(board:Begin(rbx.Vector2.new(100, 66), input), "Wrong feedback does not block next gesture")
+check(not board.grid:FindFirstChild("WrongWordFeedback"), "A fresh gesture immediately clears the previous error snapshot")
 local newDrag = board.lines.Selection.BackgroundColor3
 advance(0.5)
 check(countChildren(board.grid, "WrongWordFeedback") == 0 and board.startCell ~= nil, "Wrong effect cleans up without cancelling new drag")
@@ -366,34 +370,26 @@ end
 local Interface = luau.load(fs.readFile("src/client/controllers/InterfaceController.luau"), { environment = environment })();
 (function()
 	local panel = add(assets, "Frame", "TimedModeTest")
-	local bar = add(panel, "Frame", "FillBar")
-	local fill = add(bar, "Frame", "Fill")
 	local label = add(panel, "TextLabel", "TimeLeft")
 	local icon = add(panel, "ImageLabel", "Icon")
 	icon.Image = "authored-timer-icon"
-	fill.Size = rbx.UDim2.new(0.7, 3, 0.8, 2)
-	local timerUi = { timedTimeLeft = label, timedFill = fill }
-	Interface.UpdateTimedTimer(timerUi, nil, nil, true)
-	check(label.Text == "--:--" and fill.Size.X.Scale == 1 and fill.BackgroundColor3 == rbx.Color3.fromRGB(75,202,53), "Unconnected Timed UI resets to full green without inventing a countdown")
+	local timerUi = { timedTimeLeft = label }
+	Interface.UpdateTimedTimer(timerUi, nil, nil)
+	check(label.Text == "--:--", "Unconnected timer clears stale time")
 	Interface.UpdateTimedTimer(timerUi, 120, 120)
-	check(label.Text == "02:00" and fill.Size.Y == rbx.UDim.new(0.8,2), "Timed label formats seconds and preserves authored fill height")
-	Interface.UpdateTimedTimer(timerUi, 60, 120)
-	advance(0.18)
-	check(fill.Size.X.Scale == 0.5 and fill.BackgroundColor3 == rbx.Color3.fromRGB(255,196,54) and label.Text == "01:00", "Half time gives a half-width yellow fill")
+	check(label.Text == "02:00", "Text-only timer formats minutes and seconds")
+	Interface.UpdateTimedTimer(timerUi, 59.2, 120)
+	check(label.Text == "01:00", "Timer rounds remaining partial seconds upward")
 	Interface.UpdateTimedTimer(timerUi, 30, 120)
-	advance(0.18)
-	check(fill.Size.X.Scale == 0.25 and fill.BackgroundColor3 == rbx.Color3.fromRGB(255,196,54):Lerp(rbx.Color3.fromRGB(202,61,51),0.5), "Low time blends smoothly toward red")
+	check(label.Text == "00:30", "Text-only timer updates without a FillBar")
 	Interface.UpdateTimedTimer(timerUi, 0, 120)
-	advance(0.18)
-	check(label.Text == "00:00" and fill.Size.X.Scale == 0 and fill.BackgroundColor3 == rbx.Color3.fromRGB(202,61,51), "Expired time empties the fill and reaches red")
+	check(label.Text == "00:00", "Expired time displays zero")
 	Interface.UpdateTimedTimer(timerUi, -5, 120)
 	check(label.Text == "00:00", "Negative remaining time cannot display a negative countdown")
-	Interface.UpdateTimedTimer(timerUi, 90, 120)
-	Interface.UpdateTimedTimer(timerUi, nil, nil, true)
-	advance(0.3)
-	check(fill.Size.X.Scale == 1 and label.Text == "--:--" and icon.Image == "authored-timer-icon", "Reset cancels stale tweens and preserves the authored icon")
+	Interface.UpdateTimedTimer(timerUi, nil, nil)
+	check(label.Text == "--:--" and icon.Image == "authored-timer-icon" and not panel:FindFirstChild("FillBar"), "Reset preserves the authored icon and never generates a timer bar")
 	Interface.UpdateTimedTimer(timerUi, 30, 0)
-	check(label.Text == "--:--", "Invalid duration cannot divide by zero or start a fake timer")
+	check(label.Text == "--:--", "Invalid duration cannot start a fake timer")
 	Interface.UpdateTimedTimer({}, 30, 60)
 end)()
 
@@ -409,11 +405,11 @@ local homeBar, gameBar = createLevelBar(bars.home), createLevelBar(bars.game)
 for _, name in ipairs({ "NextLevelTitle", "NextLevelRewardTitle" }) do add(gameBar, "TextLabel", name).Visible = false end
 local rewardIcon = add(gameBar, "ImageLabel", "NextLevelRewardIcon")
 rewardIcon.Visible, rewardIcon.Image = false, "authored-hint-icon"
-Interface.UpdateLevelBars(bars, { level = 1, xp = 0, xpToNextLevel = 500, nextLevelRewardHints = 2 })
-check(gameBar:FindFirstChild("NextLevelTitle").Text == "LEVEL 2 REWARD" and gameBar:FindFirstChild("NextLevelRewardTitle").Text == "+2 Hints", "Game bar previews level 2 and its two hints")
-check(rewardIcon.Visible and rewardIcon.Image == "authored-hint-icon", "Reward shows the authored hint icon")
+Interface.UpdateLevelBars(bars, { level = 1, xp = 0, xpToNextLevel = 500 })
+check(gameBar:FindFirstChild("NextLevelTitle").Text == "LEVEL 2 REWARD" and gameBar:FindFirstChild("NextLevelRewardTitle").Text == "+1 Hint", "Game bar previews the reduced one-hint reward for level 2")
+check(not rewardIcon.Visible and rewardIcon.Image == "authored-hint-icon", "Simplified Game bar hides retired reward decorations")
 Interface.UpdateLevelBars(bars, { level = 2, xp = 300, xpToNextLevel = 600, nextLevelRewardHints = 1 })
-check(gameBar:FindFirstChild("NextLevelTitle").Visible and gameBar:FindFirstChild("NextLevelTitle").Text == "LEVEL 3 REWARD" and gameBar:FindFirstChild("NextLevelRewardTitle").Text == "+1 Hint", "Reward preview updates after leveling up")
+check(not gameBar:FindFirstChild("NextLevelTitle").Visible and gameBar:FindFirstChild("NextLevelTitle").Text == "LEVEL 4 REWARD" and gameBar:FindFirstChild("NextLevelRewardTitle").Text == "+1 Hint", "Reward preview updates after leveling up")
 advance(0.36)
 for _, root in ipairs({ homeBar, gameBar }) do
 	local fill = root:FindFirstChild("FillBar"):FindFirstChild("Fill")
@@ -430,13 +426,16 @@ check(gameBar:FindFirstChild("FillBar"):FindFirstChild("Fill").Size.X.Scale == 0
 -- New XP and additional crossed levels must not interrupt the gold/reset sequence.
 local liveBars = { home = instance("Frame"), game = instance("Frame") }
 local liveHome, liveGame = createLevelBar(liveBars.home), createLevelBar(liveBars.game)
+add(liveGame, "TextLabel", "NextLevelRewardTitle")
 Interface.UpdateLevelBars(liveBars, { level = 8, xp = 100, xpToNextLevel = 1200 })
 advance(0.51)
 check(not liveBars.levelBarFeedback[liveGame].celebrating, "Initial loaded level does not replay old level-ups")
 Interface.UpdateLevelBars(liveBars, { level = 9, xp = 0, xpToNextLevel = 1300 })
+check(not liveGame:FindFirstChild("NextLevelRewardTitle").Visible and liveGame:FindFirstChild("NextLevelRewardTitle").Text == "+1 Hint", "Simplified Game bar keeps the old reward label hidden")
 local celebration = liveBars.levelBarFeedback[liveGame]
 advance(0.2)
 Interface.UpdateLevelBars(liveBars, { level = 10, xp = 700, xpToNextLevel = 1400 })
+check(liveGame:FindFirstChild("NextLevelRewardTitle").Text == "+1 Hint", "Reward preview stays at one hint per even level")
 check(liveBars.levelBarFeedback[liveGame] == celebration and celebration.celebrating, "XP and another level during gold update the destination without restarting")
 advance(0.7)
 check(liveGame:FindFirstChild("FillBar"):FindFirstChild("Fill").Size == rbx.UDim2.fromScale(0.1, 1), "Coalesced level gains still pass through the minimum fill")
@@ -461,6 +460,18 @@ local home=add(hud,"Frame","Home")
 local gameFrame=add(hud,"Frame","Game")
 local tutorialPanel=add(hud,"Frame","Tutorial")
 local standard=add(add(home,"Frame","Gamemodes"),"Frame","Standard")
+ ;(function()
+ local modes = standard.Parent
+ for _, entry in ipairs({{standard,25},{add(modes,"Frame","Mini"),9},{add(modes,"Frame","Jumbo"),9}}) do
+  local frame = add(add(entry[1],"Frame","CanvasGroup"),"Frame","Frame1")
+  for index=1,entry[2] do add(frame,"Frame","tile"..index) end
+  if entry[1].Name == "Jumbo" then
+   local grid = add(frame,"UIGridLayout","UIGridLayout")
+   grid.CellSize, grid.CellPadding = rbx.UDim2.fromScale(0.3,0.3), rbx.UDim2.fromScale(0.03,0.03)
+   grid.FillDirection, grid.FillDirectionMaxCells, grid.SortOrder = rbx.Enum.FillDirection.Horizontal,0,rbx.Enum.SortOrder.Name
+  end
+ end
+end)()
 add(standard,"TextButton","Play")
 add(standard,"TextLabel","Waiting")
 add(home,"Frame","ButtonBar")
@@ -468,8 +479,10 @@ local boardPanel=add(gameFrame,"Frame","BoardPanel")
 local wordsPanel=add(gameFrame,"Frame","WordPanel")
 add(wordsPanel,"TextLabel","Words")
 add(add(wordsPanel,"Frame","Container"),"ScrollingFrame","ScrollingFrame")
-for _, name in ipairs({"Title","Subtitle"}) do add(gameFrame,"TextLabel",name) end
-for _, name in ipairs({"Hint","Exit"}) do add(gameFrame,"TextButton",name) end
+add(gameFrame,"TextButton","Hint")
+local scorePanel=add(gameFrame,"Frame","Score")
+add(scorePanel,"TextLabel","Score")
+add(add(scorePanel,"Frame","Level"),"TextLabel","Label")
 local levelPanel=add(gameFrame,"Frame","LevelBar")
 local levelScale=add(levelPanel,"UIScale","AuthoredScale") levelScale.Scale=0.85
 local background=add(gameFrame,"ImageLabel","Background")
@@ -481,6 +494,8 @@ local aspect=add(container,"UIAspectRatioConstraint","UIAspectRatioConstraint")
 add(queuePanel,"TextButton","Exit")
 add(queuePanel,"TextLabel","Subtitle")
 local bindings=Interface.Bind(hud)
+check(#bindings.homeTilePreviews == 3, "Home binds Standard, Mini and Jumbo authored preview grids")
+check(not bindings.exit and not bindings.title and not bindings.subtitle, "Current Game binds without retired Exit, Title or Subtitle children")
 check(bindings.queue==queuePanel and not hud:FindFirstChild("StandardQueue"), "Uses authored Queue without generating a replacement")
 check(not tutorialPanel.Visible and not queuePanel.Visible, "Renamed Tutorial and Queue start hidden")
 check(bindings.queueLeave==queuePanel:FindFirstChild("Exit"), "Queue uses authored Exit")
@@ -498,9 +513,9 @@ check(queuePortrait.BackgroundColor3==queueColor, "Queue roster updates retain c
 check(bindings.queueEntries[1]==alice and bindings.queueEntries[2]==nil and #container:GetChildren()==3, "Roster updates reuse cards and remove departures")
 check(alice:FindFirstChild("Star"):FindFirstChild("Level").Text=="8", "Repeated roster refreshes level")
 Interface.UpdateQueueTimer(bindings, 14.2)
-check(bindings.queueSubtitle.Text=="Classic Mode (15s)", "Countdown uses Classic Mode label and ceiling")
+check(bindings.queueSubtitle.Text=="Standard Mode (15s)", "Countdown uses Standard Mode label and ceiling")
 Interface.UpdateQueueTimer(bindings, -1)
-check(bindings.queueSubtitle.Text=="Classic Mode (0s)", "Countdown never becomes negative")
+check(bindings.queueSubtitle.Text=="Standard Mode (0s)", "Countdown never becomes negative")
 Interface.UpdateQueue(bindings, {})
 check(#container:GetChildren()==2 and layout.Parent==container and aspect.Parent==container and not queueTemplate.Visible, "Queue cleanup preserves authored layout and source template")
 
@@ -547,7 +562,7 @@ check(covered==0 and queuePanel.Visible and not gameFrame.Visible, "Queue remain
 advance(0.02)
 check(covered==1 and gameFrame.Visible and boardPanel.Position~=originalPositions[boardPanel], "Board slides into position as white recedes")
 check(gameFrame:FindFirstChild("Hint"):FindFirstChildOfClass("UIScale").Scale==0, "Hint enters from zero scale")
-check(levelScale.Scale<0.85 and background.Position==originalPositions[background] and hiddenMode.Position==originalPositions[hiddenMode], "Entrance respects authored scales, background and hidden modes")
+check(levelScale.Scale<0.85 and background.Position==originalPositions[background] and hiddenMode.Visible, "Entrance respects authored scales and background while showing the timer")
 advance(0.91)
 check(completed==1 and not hud:FindFirstChild("GameTransition") and boardPanel.Position==originalPositions[boardPanel], "Transition finishes at exact authored position")
 check(levelScale.Parent==levelPanel and levelScale.Scale==0.85 and not boardPanel:FindFirstChild("GameEntranceScale"), "Temporary scales removed and authored scale restored")
@@ -578,12 +593,12 @@ local function coverHome()
 end
 home.Visible,gameFrame.Visible=false,true
 local exitCancel=effects.TransitionToHome(hud,gameFrame,coverHome,function(ok) check(ok,"Exit succeeds") homeCompleted+=1 end)
-advance(0.61)
-check(gameFrame.Visible and not home.Visible and gameFrame:FindFirstChild("Exit"):FindFirstChildOfClass("UIScale").Scale==0, "Exit control shrinks first in reversed stagger")
+advance(0.66)
+check(gameFrame.Visible and not home.Visible and gameFrame:FindFirstChild("Hint"):FindFirstChildOfClass("UIScale").Scale==0, "Hint shrinks during the reverse transition without an Exit button")
 check(boardPanel.Position==originalPositions[boardPanel], "Board leaves after controls in reversed stagger")
-advance(0.24)
+advance(0.19)
 check(homeCovered==0 and gameFrame.Visible and boardPanel.Position~=originalPositions[boardPanel], "Game reverses before screen switches")
-check(levelScale.Scale<0.85 and background.Position==originalPositions[background] and hiddenMode.Position==originalPositions[hiddenMode], "Exit preserves background and hidden mode geometry")
+check(levelScale.Scale<0.85 and background.Position==originalPositions[background] and hiddenMode.Visible, "Exit preserves background and hidden mode geometry")
 advance(0.06)
 check(homeCovered==1 and home.Visible and not gameFrame.Visible and homeCompleted==0, "Home reveals while white still blocks input")
 check(boardPanel.Position==originalPositions[boardPanel] and levelScale.Scale==0.85 and not boardPanel:FindFirstChild("GameEntranceScale"), "Exit restores authored layout after switching screens")
@@ -718,7 +733,7 @@ feedbackScale.Scale = 0.8
 effects.Init(feedback)
 for _, fn in ipairs(feedback.Activated.callbacks) do fn() end
 advance(0.31)
-check(feedbackScale.Scale == 0.8, "Cross-device button pulse restores its authored scale")
+check(feedbackScale.Scale == 0.8 and not feedback:FindFirstChildOfClass("UIStroke"), "Cross-device button pulse restores its authored scale without adding a click stroke")
 -- Repeated effects preserve authored geometry and clean up their temporary objects.
 effects.Pulse(feedback, 1.1)
 advance(0.1)
@@ -836,7 +851,7 @@ do
 end
 leaderboardFrame:FindFirstChild("Frame"):Destroy()
 local leaderboardPanels = {}
-for _, category in ipairs({ "WordsFound", "1v1Wins" }) do
+for _, category in ipairs({ "WordsFound", "1v1Wins", "Level" }) do
 	local panel = add(leaderboardFrame, "Frame", category)
 	leaderboardPanels[category] = panel
 	for _, slotName in ipairs({ "One", "Three", "Two" }) do
@@ -848,7 +863,7 @@ for _, category in ipairs({ "WordsFound", "1v1Wins" }) do
 		add(mugshot, "UIStroke", "UIStroke")
 		for _, label in ipairs({ "Data", "Place", "Username" }) do add(slot, "TextLabel", label) end
 	end
-	for _, name in ipairs({ "WordsFound", "1v1Wins" }) do add(panel, "TextButton", name) end
+	for _, name in ipairs({ "WordsFound", "1v1Wins", "Level" }) do add(panel, "TextButton", name) end
 end
 do
 	local daily = modalFrames:FindFirstChild("DailyReward")
@@ -986,7 +1001,7 @@ for _, fn in ipairs(modalFrames.ChildAdded.callbacks) do fn(lateModal) end
 check(not lateModal.Visible and lateModal.Size == rbx.UDim2.fromScale(0, 0), "Late-added modals initialize hidden at zero too")
 -- Outcome binds the authored root and shares the real XP fill animation.
 modalUi:showGameOutcome({roundId="finished",mode="Standard",theme="Countries",words=10,total=10,xpEarned=220},
-	{progression={level=6,xp=400,xpToNextLevel=1000}})
+	{progression={level=6,xp=400,xpToNextLevel=2000}})
 check(gameOutcome.Visible and outcomeFill.Size.X.Scale >= 0.1, "Outcome opens through the modal system and never has an empty sliver")
 check(not gameOutcome:FindFirstChild("Words").Visible and not gameOutcome:FindFirstChild("XPWon").Visible and not outcomeFill.Parent.Visible and not gameOutcome:FindFirstChild("Play").Visible, "Outcome starts with count-up stages and bottom actions hidden")
 for _, fn in ipairs(gameOutcome:FindFirstChild("Play").Activated.callbacks) do fn() end
@@ -996,19 +1011,19 @@ check(gameOutcome:FindFirstChild("Words").Text == "2/10 Words" and not gameOutco
 advance(0.80)
 check(gameOutcome:FindFirstChild("Words").Text == "10/10 Words" and gameOutcome:FindFirstChild("XPWon").Visible and gameOutcome:FindFirstChild("XPWon").Text ~= "+220 XP" and not outcomeFill.Parent.Visible, "XP reveals and rapidly counts only after the words finish")
 advance(0.91)
-check(outcomeFill.Parent.Visible and math.abs(outcomeFill.Size.X.Scale - 0.18) < 0.00001 and gameOutcome:FindFirstChild("CurrentXP").Text == "Level 6 | 180 / 1000 XP", "Progress bar reveals at pre-award XP before filling")
+check(outcomeFill.Parent.Visible and math.abs(outcomeFill.Size.X.Scale - 0.1) < 0.00001 and gameOutcome:FindFirstChild("CurrentXP").Text == "Level 6 | 180 / 2000 XP", "Progress bar reveals at pre-award XP before filling")
 check(not gameOutcome:FindFirstChild("Home").Visible, "Bottom buttons wait until the bar has filled")
 advance(1.5)
 check(gameOutcome:FindFirstChild("Play").Visible and gameOutcome:FindFirstChild("Home").Visible and Interface.OutcomeButtonsReady(gameOutcome), "Bottom actions pop in last and become ready")
-check(gameOutcome:FindFirstChild("Title").Text == "Complete!" and gameOutcome:FindFirstChild("LevelTheme").Text == "Countries | Themes", "Outcome displays the completed theme and mode")
+check(gameOutcome:FindFirstChild("Title").Text == "Complete!" and gameOutcome:FindFirstChild("LevelTheme").Text == "Theme: Countries", "GameOutcome displays only the prefixed theme without a mode name")
 check(gameOutcome:FindFirstChild("Words").Text == "10/10 Words" and gameOutcome:FindFirstChild("XPWon").Text == "+220 XP", "Outcome displays round words and server-earned XP")
-check(gameOutcome:FindFirstChild("CurrentXP").Text == "Level 6 | 400 / 1000 XP" and math.abs(outcomeFill.Size.X.Scale - 0.4) < 0.00001, "Outcome shows the current saved level progress")
+check(gameOutcome:FindFirstChild("CurrentXP").Text == "Level 6 | 400 / 2000 XP" and math.abs(outcomeFill.Size.X.Scale - 0.2) < 0.00001, "Outcome shows the current saved level progress")
 check(outcomeIcon.Image == "authored-thumbs-up" and gameOutcome.Size == rbx.UDim2.fromScale(0.33, 0.33), "Outcome preserves its authored icon and uses the new modal size")
-modalUi:updateGameOutcome({progression={level=7,xp=220,xpToNextLevel=1100}})
+modalUi:updateGameOutcome({progression={level=7,xp=220,xpToNextLevel=2200}})
 advance(0.36)
 check(outcomeFill.Size == rbx.UDim2.fromScale(1, 1) and outcomeFill.BackgroundColor3 == rbx.Color3.fromRGB(255, 211, 92), "Outcome XP fill shares the gold level-up effect")
 advance(1.02)
-check(math.abs(outcomeFill.Size.X.Scale - 0.2) < 0.00001 and gameOutcome:FindFirstChild("XPWon").Text == "+220 XP", "Late profile updates refresh progress without changing earned round XP")
+check(math.abs(outcomeFill.Size.X.Scale - 0.1) < 0.00001 and gameOutcome:FindFirstChild("XPWon").Text == "+220 XP", "Late profile updates refresh progress without changing earned round XP")
 for _, fn in ipairs(gameOutcome:FindFirstChild("Play").Activated.callbacks) do fn() end
 for _, fn in ipairs(gameOutcome:FindFirstChild("Home").Activated.callbacks) do fn() end
 check(outcomeActions[1] == "play:finished" and outcomeActions[2] == "home:finished", "Outcome buttons route the exact completed round to the flow controller")
@@ -1035,24 +1050,24 @@ end)()
 -- Closing/reopening invalidates every queued stage and retains real pre-round progress.
 ;(function()
 	local result = {roundId="sequence-cancel",mode="Standard",theme="Animals",words=3,total=7,xpEarned=100,
-		beforeProgression={level=1,xp=450}}
-	modalUi:showGameOutcome(result, {progression={level=1,xp=450}})
+		beforeProgression={level=1,xp=950}}
+	modalUi:showGameOutcome(result, {progression={level=1,xp=950}})
 	advance(0.35)
 	modalUi:updateGameOutcome({progression={level=2,xp=120}})
-	check(math.abs(outcomeFill.Size.X.Scale-0.9)<0.00001 and not outcomeFill.Parent.Visible, "Profile packets during count-up cannot skip the pre-round bar stage")
+	check(math.abs(outcomeFill.Size.X.Scale-0.95)<0.00001 and not outcomeFill.Parent.Visible, "Profile packets during count-up cannot skip the pre-round bar stage")
 	modalUi:hideFrame(gameOutcome)
 	advance(5)
 	check(not gameOutcome.Visible and not gameOutcome:FindFirstChild("XPWon"):FindFirstChild("OutcomeScale"), "Closing mid-sequence cancels delayed stages and removes temporary scales")
 	result.roundId = "sequence-reopen"
-	modalUi:showGameOutcome(result, {progression={level=1,xp=450}})
+	modalUi:showGameOutcome(result, {progression={level=1,xp=950}})
 	advance(1.9)
-	check(outcomeFill.Parent.Visible and math.abs(outcomeFill.Size.X.Scale-0.9)<0.00001 and not gameOutcome:FindFirstChild("Play").Visible, "Reopened outcome starts from its captured pre-round XP")
+	check(outcomeFill.Parent.Visible and math.abs(outcomeFill.Size.X.Scale-0.95)<0.00001 and not gameOutcome:FindFirstChild("Play").Visible, "Reopened outcome starts from its captured pre-round XP")
 	advance(0.6)
 	check(outcomeFill.Size.X.Scale == 1 and outcomeFill.BackgroundColor3 == rbx.Color3.fromRGB(255,211,92), "Award crossing a level plays the gold full-bar stretch")
 	check(not gameOutcome:FindFirstChild("Home").Visible, "Bottom actions wait through the gold level-up stage")
 	advance(2)
 	check(gameOutcome:FindFirstChild("Words").Text == "3/7 Words" and gameOutcome:FindFirstChild("XPWon").Text == "+100 XP", "Partial completion counts only actual found words and awarded XP")
-	check(gameOutcome:FindFirstChild("CurrentXP").Text == "Level 2 | 50 / 600 XP" and Interface.OutcomeButtonsReady(gameOutcome), "Awarded XP supplies the final bar even if its profile snapshot arrived late")
+	check(gameOutcome:FindFirstChild("CurrentXP").Text == "Level 2 | 50 / 1200 XP" and Interface.OutcomeButtonsReady(gameOutcome), "Awarded XP supplies the final bar even if its profile snapshot arrived late")
 	modalUi:hideFrame(gameOutcome)
 	advance(0.4)
 	modalUi:showGameOutcome({roundId="zero-award",words=0,total=7,xpEarned=0,beforeProgression={level=2,xp=50}}, {progression={level=2,xp=50}})
@@ -1060,6 +1075,24 @@ end)()
 	check(gameOutcome:FindFirstChild("Words").Text == "0/7 Words" and gameOutcome:FindFirstChild("XPWon").Text == "+0 XP" and Interface.OutcomeButtonsReady(gameOutcome), "Zero-word and zero-XP outcomes finish the sequence without division errors")
 	modalUi:hideFrame(gameOutcome)
 	advance(0.4)
+end)()
+
+
+;(function()
+ local hint = add(hud, "ImageButton", "WobbleTest")
+ hint.Rotation = 4
+ local scale = add(hint, "UIScale", "AuthoredScale") scale.Scale = 0.8
+ local wobble = shared.ui.UIEffects.CreateHintWobble(hint)
+ local moved = false
+ for _=1,420 do wobble:Step(1/60,true) moved = moved or hint.Rotation ~= 4 end
+ check(moved and scale.Scale == 0.8, "Hint periodically wobbles without taking over its authored scale")
+ wobble:Step(1/60,false)
+ check(hint.Rotation == 4, "Input lock cancels hint motion and restores authored rotation")
+ wobble:Destroy() hint:Destroy()
+ modalUi:showGameOutcome({roundId="timeout",timedOut=true,words=1,total=7,xpEarned=60}, {progression={level=2,xp=60}})
+ advance(4)
+ check(gameOutcome:FindFirstChild("Title").Text == "Time's up!" and Interface.OutcomeButtonsReady(gameOutcome), "Timeout displays partial results with normal replay and Home actions")
+ modalUi:hideFrame(gameOutcome)
 end)()
 
 -- Verify uses its outer Okay button and the native async group prompt.
@@ -1084,6 +1117,65 @@ advance(0.5)
 for _, fn in ipairs(verifyFrame:FindFirstChild("Quit").Activated.callbacks) do fn() end
 advance(0.36)
 check(not verifyFrame.Visible, "Verify Quit closes the outer modal")
+
+-- Automatic Verify waits for the first normal completion and an unobstructed Home.
+do
+	local ready, firstPuzzle, ownerTest, inGroup = false, false, false, false
+	local profile = {tutorial={completed=false}, progression={solves=0}, account={groupRewardClaimed=false}}
+	local root = add(assets, "ScreenGui", "VerifyFlowTest")
+	local frames = add(root, "Frame", "Frames")
+	frames.ChildAdded, frames.ChildRemoved = signal(), signal()
+	local verify = add(frames, "Frame", "Verify")
+	local controller = MetaController.new({
+		getSnapshot=function() return profile end,
+		canShowVerifyPrompt=function() return ready end,
+		hasCompletedFirstPuzzle=function() return firstPuzzle end,
+		isVerifyPromptTestUser=function() return ownerTest end,
+	})
+	controller.root, controller.elements = root, {frames=frames, verifyFrame=verify}
+	controller.isPlayerInGroup = function() return inGroup end
+	controller:initializeModalFrames()
+	controller:queueVerifyPrompt(profile)
+	check(not controller.verifyPromptQueued, "Verify never queues during unfinished onboarding")
+	profile.tutorial.completed = true
+	controller:queueVerifyPrompt(profile)
+	check(not controller.verifyPromptQueued, "Finishing tutorial alone cannot queue Verify for a normal player")
+	profile.progression.solves = 10
+	controller:queueVerifyPrompt(profile)
+	check(not controller.verifyPromptQueued, "Returning veteran is not treated as a first puzzle completion")
+	profile.progression.solves, firstPuzzle = 1, true
+	controller:queueVerifyPrompt(profile)
+	local token = controller.verifyPromptToken
+	controller:queueVerifyPrompt(profile)
+	check(controller.verifyPromptQueued and controller.verifyPromptToken == token, "First normal completion queues only one Verify prompt")
+	advance(1.3)
+	check(not verify.Visible and controller.verifyPromptQueued, "Outcome, tutorial, queue and transition blockers defer Verify")
+	ready = true
+	advance(1.1)
+	check(verify.Visible and controller.verifyPromptShownThisSession, "Verify opens once Home is ready after the first normal puzzle")
+	controller:hideFrame(verify)
+	advance(0.4)
+	controller:queueVerifyPrompt(profile)
+	advance(1.3)
+	check(not verify.Visible and not controller.verifyPromptQueued, "Closing Verify prevents repeated profile updates from reopening it")
+	controller.verifyPromptShownThisSession = false
+	inGroup = true
+	check(not controller:shouldAutoShowVerifyPrompt(profile), "Ordinary group members do not receive join invitations")
+	inGroup, profile.account.groupRewardClaimed = false, true
+	check(not controller:shouldAutoShowVerifyPrompt(profile), "Previously claimed group rewards suppress ordinary invitations")
+	ownerTest, inGroup, firstPuzzle, profile.progression.solves = true, true, false, 0
+	controller:queueVerifyPrompt(profile)
+	advance(1.3)
+	check(verify.Visible, "Owner testing bypasses membership, prior reward and normal-puzzle requirements after tutorial")
+	controller:hideFrame(verify)
+	advance(0.4)
+	controller.verifyPromptShownThisSession = false
+	controller:queueVerifyPrompt(profile)
+	controller:destroy()
+	advance(1.3)
+	check(not verify.Visible and not controller.verifyPromptQueued, "Destroyed controllers cannot reopen delayed Verify prompts")
+	root:Destroy()
+end
 
 -- Settings update the real snapshot/remote and survive click/highlight callbacks.
 for _, name in ipairs({ "Music", "SFX", "DuelInvites" }) do
@@ -1113,8 +1205,8 @@ advance(0.5)
 for _, fn in ipairs(settingsFrame:FindFirstChild("Quit").Activated.callbacks) do fn() end
 advance(0.36)
 check(not settingsFrame.Visible and settingsRows.Size == rbx.UDim2.fromScale(1, 1), "Settings Quit closes the outer modal while preserving its rows")
--- Two authored podiums: exact slot names, independent data and exclusive tabs.
-check(leaderboardPanels.WordsFound.Visible and not leaderboardPanels["1v1Wins"].Visible, "Words Found is the only default leaderboard panel")
+-- Three authored podiums: exact slot names, independent data and exclusive tabs.
+check(leaderboardPanels.WordsFound.Visible and not leaderboardPanels["1v1Wins"].Visible and not leaderboardPanels.Level.Visible, "Words Found is the only default leaderboard panel")
 local wordsRanking = {
 	{ UserId=55, Username="WordWinner", Score=900, Thumbnail="headshot:55" },
 	{ UserId=66, Username="Second", Score=800, Thumbnail="" },
@@ -1150,7 +1242,7 @@ for rank, medal in ipairs(medals) do
 	check(mugshot.BackgroundColor3 == medal[2] and mugshot:FindFirstChild("UIStroke").Color == medal[3], "Mugshot uses medal background and darker outline")
 	check(not mugshot:FindFirstChild("Profile").Visible and slot:FindFirstChild("UIStroke").Color == rbx.Color3.fromRGB(1,2,3), "Portrait placeholder hides without recoloring the authored card")
 end
-check(#leaderboardPanels.WordsFound:GetChildren() == 5, "Leaderboard never clones a fourth slot or adds a layout")
+check(#leaderboardPanels.WordsFound:GetChildren() == 6, "Leaderboard never clones a fourth slot or adds a layout")
 check(leaderboardPanels.WordsFound:FindFirstChild("Two"):FindFirstChild("Mugshot").Image == "rbxthumb://type=AvatarHeadShot&id=66&w=150&h=150", "A missing cached image requests the actual ranked user's headshot")
 local function pressLeaderboard(panel, name)
 	for _, callback in ipairs(panel:FindFirstChild(name).Activated.callbacks) do callback() end
@@ -1169,14 +1261,42 @@ modalUi:applyLeaderboardUpdate("1v1Wins", {}, 13)
 local emptySlot = leaderboardPanels["1v1Wins"]:FindFirstChild("One")
 check(emptySlot:FindFirstChild("Username").Text == "No player yet" and emptySlot:FindFirstChild("Mugshot").Image == "" and emptySlot:FindFirstChild("Mugshot").ImageTransparency == 1, "Empty results clear previous username and headshot")
 pressLeaderboard(leaderboardPanels["1v1Wins"], "WordsFound")
-check(leaderboardPanels.WordsFound.Visible and not leaderboardPanels["1v1Wins"].Visible, "Words Found button switches back")
+check(leaderboardPanels.WordsFound.Visible and not leaderboardPanels["1v1Wins"].Visible and not leaderboardPanels.Level.Visible, "Words Found button switches back")
+;(function()
+ local ranking={{UserId=44,Username="TopLevel",Score=87,Thumbnail="headshot:44"},{UserId=45,Username="NextLevel",Score=65}}
+ modalUi:applyLeaderboardUpdate("Level",ranking,10,{UserId=1,Score=12,RankText="#8"})
+ pressLeaderboard(leaderboardPanels.WordsFound,"Level")
+ check(leaderboardPanels.Level.Visible and not leaderboardPanels.WordsFound.Visible and not leaderboardPanels["1v1Wins"].Visible,"Level button exclusively opens the authored Level panel")
+ local winner=leaderboardPanels.Level:FindFirstChild("One")
+ check(winner:FindFirstChild("Username").Text=="TopLevel" and winner:FindFirstChild("Data").Text=="87" and winner:FindFirstChild("Place").Text=="#1","Level podium shows authoritative saved XP levels and rank")
+ local you=leaderboardFrame:FindFirstChild("You")
+ local originalSnapshot=modalUi.ctx.getSnapshot
+ modalUi.ctx.getSnapshot=function() return {score=100000,progression={level=12,wordsFound=999,duel={wins=88}}} end
+ modalUi:renderLeaderboard()
+ check(you:FindFirstChild("Data").Text=="12" and you:FindFirstChild("Place").Text=="#8","Level You row uses saved XP level instead of word count or round score")
+ modalUi.ctx.getSnapshot=function() return {progression={level=13}} end
+ modalUi:renderLeaderboard()
+ check(you:FindFirstChild("Data").Text=="13" and you:FindFirstChild("Place").Text=="--","A new level clears the stale personal rank until matching rankings arrive")
+ modalUi:applyLeaderboardUpdate("Level",ranking,11,{UserId=1,Score=13,RankText="#7"})
+ check(you:FindFirstChild("Place").Text=="#7","Matching Level personal update restores the rank")
+ modalUi:applyLeaderboardUpdate("WordsFound",wordsRanking,14)
+ check(leaderboardPanels.Level.Visible,"Refreshing another category preserves the Level tab")
+ modalUi:applyLeaderboardUpdate("Level",{},9)
+ check(winner:FindFirstChild("Data").Text=="87","Stale Level packets cannot replace current rankings")
+ pressLeaderboard(leaderboardPanels.Level,"1v1Wins")
+ check(not leaderboardPanels.Level.Visible and leaderboardPanels["1v1Wins"].Visible,"Level panel can switch directly to Wins")
+ pressLeaderboard(leaderboardPanels["1v1Wins"],"Level")
+ check(leaderboardPanels.Level.Visible and not leaderboardPanels["1v1Wins"].Visible,"Wins panel can switch back to Level")
+ pressLeaderboard(leaderboardPanels.Level,"WordsFound")
+ modalUi.ctx.getSnapshot=originalSnapshot
+end)()
 for category in pairs(leaderboardPanels) do
 	modalUi:selectLeaderboard(category)
 	modalUi:showFrame(leaderboardFrame)
 	advance(0.5)
 	pressLeaderboard(leaderboardFrame, "Quit")
 	advance(0.36)
-	check(not leaderboardFrame.Visible, "Direct Leaderboards.Quit closes the whole modal from either tab")
+	check(not leaderboardFrame.Visible, "Direct Leaderboards.Quit closes the whole modal from every tab")
 end
 ;(function()
  local template = add(assets,"Frame","LeaderboardTemplate")
@@ -1187,7 +1307,7 @@ end
  modalUi.elements.leaderboardTemplate = template
  local entries = {}
  for i=1,25 do entries[i]={UserId=100+i,Username="Rank"..i,Score=1000-i} end
- for _, category in ipairs({"WordsFound","1v1Wins"}) do
+ for _, category in ipairs({"WordsFound","1v1Wins","Level"}) do
   local container = add(leaderboardPanels[category],"ScrollingFrame","Container")
   add(container,"UIListLayout","UIListLayout")
   local bottom = add(container,"Frame","Bottom")
@@ -1203,7 +1323,7 @@ end
   modalUi:applyLeaderboardUpdate(category,{entries[2]},51)
   check(#container:GetChildren() == 3 and container:FindFirstChild("LeaderboardRank_1"):FindFirstChild("Username").Text == "Rank2", "Shrinking rankings remove stale rows and update retained identities")
   modalUi:applyLeaderboardUpdate(category,{},52)
-  check(#container:GetChildren() == 2 and container:FindFirstChild("Bottom") == bottom and bottom.Size == bottomSize and bottom.LayoutOrder > 20, "Both leaderboard tabs preserve authored Bottom padding after refresh and empty rankings")
+  check(#container:GetChildren() == 2 and container:FindFirstChild("Bottom") == bottom and bottom.Size == bottomSize and bottom.LayoutOrder > 20, "Every leaderboard tab preserves authored Bottom padding after refresh and empty rankings")
  end
 end)()
 -- One shared backdrop follows real direct-child visibility, including external changes.
@@ -1445,7 +1565,7 @@ duelUi:updateOutcome({progression={level=4,xp=160,xpToNextLevel=800}})
 advance(0.36)
 check(duelFill.BackgroundColor3 == rbx.Color3.fromRGB(255,211,92), "Duel XP fill shares the gold level-up effect")
 advance(1.1)
-check(math.abs(duelFill.Size.X.Scale-0.2)<0.00001 and duelOutcomeFrame:FindFirstChild("XPWon").Text == "+920 XP", "Late snapshots refresh progress without altering earned match XP")
+check(math.abs(duelFill.Size.X.Scale-0.1)<0.00001 and duelOutcomeFrame:FindFirstChild("XPWon").Text == "+920 XP", "Late snapshots refresh progress without altering earned match XP")
 pressDuel(duelOutcomeFrame,"Home")
 pressDuel(duelOutcomeFrame,"Home")
 check(#duelHomes == 1 and duelHomes[1] == "first" and not duelOutcomeFrame.Visible, "Home returns once with the completed match identity")
@@ -1535,4 +1655,409 @@ advance(0.5)
 check(shop.Visible and shop.Size == rbx.UDim2.fromScale(0.33, 0.33), "Rebinding the same authored modal cannot revive a previous controller lifetime's close callback")
 
 
+;(function()
+	local generator = require("../src/shared/puzzle/PuzzleGenerator")
+	local strands = generator.Generate(generator.BuildTutorialDefinition(51), 51)
+	-- Retain a rectangular renderer fixture independently of the square tutorial.
+	strands.gridWidth, strands.letters = 2, {{"C","A"},{"D","T"},{"O","G"}}
+	strands.words, strands.spangram = {"CAT","DOG"}, "DOG"
+	strands.placedWordsByWord.FOX = nil
+	board:Build(strands, "Standard", true)
+	advance(0.6)
+	check(board.adjacent and ui.title.Text == "STRANDS" and ui.subtitle.Text == "Furry friends", "Strands binds its theme clue and generated tile grid")
+	check(board.rows.CAT.Visible and board.rows.DOG.Visible and not ui.wordList:FindFirstChild("StrandsEmpty"), "All target words appear before discovery")
+	check(board.tileFaces[1][1].Parent == board.grid and board.tileFaces[1][1].ZIndex < board.tiles[1][1].ZIndex, "Tile faces cannot cover their letters under sibling Z ordering")
+	check(not board.grid:FindFirstChild("GridRow_1"), "Grid has no word-search ruled paper")
+	local before = #submissions
+	board:Begin(rbx.Vector2.new(150, 60), input)
+	board:Move(rbx.Vector2.new(450, 60))
+	board:Move(rbx.Vector2.new(450, 200))
+	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CAT" and #board.selection == 3, "Selected letters follow a real bent pointer drag")
+	check(#board.lines.Selection:GetChildren() == 2, "Selection draws each bend as its own segment")
+	board:Move(rbx.Vector2.new(450, 60))
+	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CA" and #board.selection == 2, "Pointer backtracking removes one letter and segment")
+	board:Move(rbx.Vector2.new(450, 200))
+	board:Move(rbx.Vector2.new(450, 200))
+	check(#board.selection == 3, "Repeated motion in a tile cannot append it twice")
+	board:Finish()
+	check(#submissions == before + 1 and submissions[#submissions].word == "CAT", "Bent drag submits the complete selected path")
+	board:Progress({{userId=1, foundWords={CAT=true}, hintedWords={}}})
+	check(board.rows.CAT.Visible and board.rows.DOG.Visible and not ui.wordList:FindFirstChild("StrandsEmpty"), "Found and unfound target words both remain in the list")
+	check(board.rows.CAT:FindFirstChild("Word").Text == "CAT", "Discovered words remain readable without a strike-through")
+	check(board.lines.Found_CAT.Visible and #board.lines.Found_CAT:GetChildren() == 2, "Solved bending paths persist")
+	check(board:Begin(rbx.Vector2.new(150,60),input), "Solved tiles remain available for bonus words")
+	board:Cancel()
+	board:Progress({{userId=1, foundWords={CAT=true}, hintedWords={DOG=true}}})
+	local pulse = board.hintPulses.DOG
+	check(board.tileFaces[3][1]:FindFirstChild("WhiteFace").BackgroundColor3 == rbx.Color3.new(1,1,1), "Hint pulse begins white")
+	advance(0.85)
+	local segment = board.lines.Hint_DOG:FindFirstChild("Segment1")
+	check(segment.BackgroundColor3 == rbx.Color3.fromRGB(255,199,55) and board.rows.DOG.Visible, "Hint keeps its target visible and pulses its bent path")
+	board:RefreshLines()
+	check(board.hintPulses.DOG == pulse and segment.BackgroundColor3 == rbx.Color3.fromRGB(255,199,55), "Drag refresh preserves a segmented hint's pulse phase")
+	local hintFace = board.tileFaces[3][1]:FindFirstChild("WhiteFace")
+	check(hintFace.BackgroundColor3 == segment.BackgroundColor3 and segment:FindFirstChild("Core").BackgroundColor3 == segment.BackgroundColor3, "Hint tiles and links reach gold together")
+	local goldTween
+	for _, tween in ipairs(tweenService.created) do if tween.node == hintFace and tween.info.RepeatCount == -1 then goldTween = tween end end
+	check(goldTween and goldTween.info.Reverses and goldTween.info.Time == 0.85, "Hint repeatedly reverses from gold to white until solved")
+	board:Progress({{userId=1, foundWords={CAT=true,DOG=true}}})
+	check(board.completed and not board.hintPulses.DOG, "Final find completes the board and stops hint work")
+	check(board.tileFaces[3][1]:FindFirstChild("WhiteFace").BackgroundColor3 == rbx.Color3.new(1,1,1), "Finding the hinted word restores white tile faces before permanent color")
+	advance(0.13)
+	check(board.tileFaces[3][1]:FindFirstChild("WhiteFace").BackgroundTransparency == 1, "Spangram tiles retain their solved highlight")
+	check(board.wordColors.CAT ~= board.wordColors.DOG, "Each confirmed word has a different color")
+	for _, word in ipairs({"CAT", "DOG"}) do
+		local cell = strands.placedWordsByWord[word].path[1]
+		local gradient = board.tileFaces[cell.row][cell.column]:FindFirstChild("SelectionGradient")
+		for _, point in ipairs(strands.placedWordsByWord[word].path) do
+			check(board.tiles[point.row][point.column].TextColor3 == rbx.Color3.new(1,1,1), "Every solved letter is white on its permanent solution color")
+		end
+		local solvedLink = board.lines["Found_"..word]:FindFirstChild("Segment1")
+		check(solvedLink.BackgroundTransparency == 0 and solvedLink:FindFirstChild("Core").BackgroundColor3 == board.wordColors[word], "Solved connectors and their cores use the opaque solution color instead of white")
+
+		check(board.lines["Found_"..word]:FindFirstChild("Segment1").BackgroundColor3 == board.wordColors[word]
+			and board.rows[word].BackgroundColor3 == board.wordColors[word]
+			and gradient.Color.Keypoints[1].Value == board.wordColors[word]:Lerp(rbx.Color3.new(1,1,1),0.4), "Found tiles, links and row share the word color")
+	end
+	local catColor, dogColor = board.wordColors.CAT, board.wordColors.DOG
+	board:Progress({{userId=1, foundWords={CAT=true,DOG=true}}})
+	check(board.wordColors.CAT == catColor and board.wordColors.DOG == dogColor, "Repeated progress does not recolor found words")
+	board:Build(strands,"Standard",true)
+	advance(0.6)
+	check(not board.completed and next(board.solvedCells)==nil and board.rows.CAT.Visible, "Replay clears solved tiles and shows the fresh target list")
+	check(board.tiles[1][1].TextColor3 ~= rbx.Color3.new(1,1,1), "Fresh unsolved tiles restore dark readable letters")
+	board:Begin(rbx.Vector2.new(150,60), input)
+	board:Move(rbx.Vector2.new(150,335))
+	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CDO" and #board.selection == 3, "Fast pointer movement samples intermediate adjacent tiles")
+	board:Finish()
+	check(countChildren(board.grid,"WrongWordFeedback") == 1, "Wrong bending word uses one synchronized whole-path flash")
+	local feedback = board.grid:FindFirstChild("WrongWordFeedback")
+	check(feedback:FindFirstChild("Segment1") and feedback:FindFirstChild("Segment2"), "Whole-path flash includes every connection")
+	for index,cell in ipairs({{1,1,"C"},{2,1,"D"},{3,1,"O"}}) do
+		local plate,label = feedback:FindFirstChild("WrongTile"..index),feedback:FindFirstChild("WrongLetter"..index)
+		local face = board.tileFaces[cell[1]][cell[2]]
+		check(plate and plate.BackgroundColor3==rbx.Color3.fromRGB(255,63,83) and plate.BackgroundTransparency==0
+			and plate.Position==face.Position and plate.Size==face.Size, "Every attempted tile flashes its full face red in place")
+		check(label.Text==cell[3] and label.TextColor3==rbx.Color3.new(1,1,1) and label.ZIndex>plate.ZIndex
+			and not label.Active and not label.Selectable, "Failed letters stay readable without capturing input")
+	end
+	check(not feedback:FindFirstChild("WrongTile4") and not feedback.Active and not feedback.Selectable, "Only the attempted cells flash and the group is passive")
+	advance(0.41)
+	check(feedback:FindFirstChild("WrongTile1").BackgroundTransparency==1 and feedback:FindFirstChild("WrongLetter1").TextTransparency==1, "Faces and letters fade out together")
+	advance(0.09)
+	check(countChildren(board.grid,"WrongWordFeedback")==0, "Whole-word feedback cleans up")
+	board:ActivateCell({row=1,column=1})
+	board:KeyboardMove(0,1)
+	board:KeyboardMove(1,0)
+	board:ActivateCell({row=2,column=2})
+	check(submissions[#submissions].word == "CAT", "Manual keyboard movement builds the same bending word without changing UI focus")
+	board:Build(strands,"Standard",true)
+	advance(2)
+	check(not board.grid:FindFirstChild("CurrentWord") and not board.grid:FindFirstChild("TileTray"), "Rebuild creates no footer or replacement tray")
+	local diagonal = {
+		rules="Strands", title="Diagonal fixture", words={"CAT"},
+		letters={{"C","X","X"},{"X","A","X"},{"X","X","T"}},
+		placedWordsByWord={CAT={path={{row=1,column=1},{row=2,column=2},{row=3,column=3}}}},
+	}
+	board:Build(diagonal,"Standard",true)
+	board.grid.AbsoluteSize = rbx.Vector2.new(600,600)
+	advance(0.6)
+	check(board.grid.Position == rbx.UDim2.fromScale(0.5,0.5) and board.grid.Size == rbx.UDim2.fromScale(0.98,0.98), "Square grid uses the full authored frame with even margins")
+	local face = board.tileFaces[1][1]
+	local edge = face:FindFirstChildOfClass("UIStroke")
+	check(face.BackgroundColor3 == rbx.Color3.new(1,1,1) and edge.Color == rbx.Color3.new(0,0,0) and edge.Transparency == 0.82, "White tiles have a faint black outline")
+	check(face:FindFirstChild("WhiteFace").BackgroundTransparency == 0 and face:FindFirstChild("SelectionShine"):FindFirstChildOfClass("UIStroke").Transparency == 1, "Idle tiles have no green tint")
+	check(ui.boardPanel:FindFirstChildOfClass("UIAspectRatioConstraint").AspectRatio == 1, "Strands board stays square")
+	check(not board:Begin(rbx.Vector2.new(200,100),input), "Pointer down in the tile gap cannot begin a word")
+	board:Begin(rbx.Vector2.new(100,100),input)
+	board:Move(rbx.Vector2.new(207,195))
+	check(#board.selection == 1, "Off-centre diagonal corner movement ignores the side tile's gap")
+	board:Move(rbx.Vector2.new(300,300))
+	board:Move(rbx.Vector2.new(408,397))
+	board:Move(rbx.Vector2.new(500,500))
+	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CAT" and #board.selection == 3, "Diagonal drag crosses two gaps without collecting side neighbours")
+	local link = board.lines.Selection:FindFirstChild("Segment1")
+	check(link.Size.X.Offset < 200 and link:FindFirstChild("Core") ~= nil, "Diagonal link bridges tile edges with a color-matched rounded core instead of crossing letters")
+	advance(0.13)
+	check(face:FindFirstChild("WhiteFace").BackgroundTransparency == 1 and face:FindFirstChild("SelectionShine"):FindFirstChildOfClass("UIStroke").Transparency == 0.15, "Dragging turns connected tiles grey with a light inset rim")
+	board:Finish()
+	check(submissions[#submissions].word == "CAT", "Diagonal gesture still submits its correct canonical word")
+	advance(0.13)
+	check(face:FindFirstChild("WhiteFace").BackgroundTransparency == 0, "Unconfirmed drag highlights clear on release")
+	local countBeforeReverse = #submissions
+	board:Begin(rbx.Vector2.new(500,500),input)
+	board:Move(rbx.Vector2.new(300,300))
+	board:Move(rbx.Vector2.new(100,100))
+	board:Finish()
+	check(#submissions == countBeforeReverse + 1 and submissions[#submissions].word == "CAT" and submissions[#submissions].path[1].row == 3, "Backward drag submits canonical answer with actual reversed path")
+	boardPanel.Name = "BOARDINFO"
+	local rebound = Interface.Bind(hud)
+	check(rebound.boardPanel == boardPanel, "Authored BOARDINFO binds without requiring a replacement BoardPanel")
+	local originalPosition, originalSize = ui.boardPanel.Position, ui.boardPanel.Size
+	board:Build(diagonal,"Standard",true)
+	check(ui.boardPanel.Position == originalPosition and ui.boardPanel.Size == originalSize, "Strands rendering preserves the authored frame geometry")
+	check(board.tileFaces[1][1]:FindFirstChild("BoardRevealScale").Scale == 0 and board.tileShadows[1][1]:FindFirstChild("BoardRevealScale").Scale == 0, "Faces and shadows join the staggered entrance")
+	board.cancelEntrance()
+	check(not board.tileFaces[1][1]:FindFirstChild("BoardRevealScale") and not board.tileShadows[1][1]:FindFirstChild("BoardRevealScale"), "Cancelling entry restores faces and shadows immediately")
+	local effect, effectFace = board.tileFeedback[1][1], board.tileFaces[1][1]
+	effect:Set(true, true)
+	local tweenCount = #tweenService.created
+	effect:Set(true, true)
+	check(#tweenService.created == tweenCount, "Repeated tile updates do not restart highlight or pulse")
+	effect:Set(false, true)
+	effect:Set(true, true)
+	advance(0.13)
+	check(effectFace:FindFirstChild("WhiteFace").BackgroundTransparency == 1, "Rapid backtrack and reselect keep the latest highlight")
+	effect:Set(false, true)
+	board:Build(diagonal,"Standard",true)
+	advance(0.6)
+	check(board.tileFaces[1][1]:FindFirstChild("WhiteFace").BackgroundTransparency == 0, "Rebuild cancels old effects without tinting new tiles")
+	board:Begin(rbx.Vector2.new(100,100),input)
+	board:Move(rbx.Vector2.new(300,300))
+	local freshLink = board.lines.Selection:FindFirstChild("Segment1")
+	check(freshLink:FindFirstChild("LinkReveal") ~= nil, "Fresh selection links animate into place")
+	board:Move(rbx.Vector2.new(100,100))
+	advance(0.4)
+	check(not freshLink.Parent and not effectFace:FindFirstChildOfClass("UIScale"), "Backtracking and rebuild remove temporary effect scales")
+	local bonusPuzzle = {rules="Strands", words={"CAT","DOG","HEN"}, letters={{"C","A","T"},{"D","O","G"},{"H","E","N"}}, placedWordsByWord={}}
+	for row, word in ipairs(bonusPuzzle.words) do
+		bonusPuzzle.placedWordsByWord[word] = {path={{row=row,column=1},{row=row,column=2},{row=row,column=3}}}
+	end
+	board:Build(bonusPuzzle,"Standard",true)
+	advance(0.6)
+	board:Progress({{userId=1,foundWords={CAT=true}}})
+	local catColor = board.wordColors.CAT
+	local beforeBonus = #submissions
+	board:Begin(rbx.Vector2.new(100,100),input)
+	board:Move(rbx.Vector2.new(300,300))
+	board:Move(rbx.Vector2.new(500,100))
+	check(board.selectionColor == rbx.Color3.fromRGB(164,170,179) and board.lines.Selection:FindFirstChild("Segment1").BackgroundColor3 == board.selectionColor, "Selection links use neutral grey even over solved tiles")
+	board:Finish()
+	check(#submissions == beforeBonus+1 and submissions[#submissions].word == "COT", "Non-theme dictionary word submits its actual path without wrong feedback")
+	board:Progress({{userId=1,foundWords={CAT=true},bonusWords={COT=true}}})
+	check(not board.grid:FindFirstChild("BonusXP") and not board.completed and not board.rows.COT, "Extra words show no XP popup and do not add a target row or complete the board")
+	check(board.wordColors.CAT == catColor and not board.solvedCells["2:2"], "Bonus does not change solved colors or claim extra tiles")
+	board:Progress({{userId=1,foundWords={CAT=true},bonusWords={COT=true}}})
+	check(countChildren(board.grid,"BonusXP")==0, "Repeated snapshots never create an XP popup")
+	advance(0.81)
+	check(not board.grid:FindFirstChild("BonusXP"), "Bonus XP feedback cleans itself up")
+end)()
+
+
+
+
+;(function()
+ ui.title, ui.subtitle = nil, nil
+ board:Build(puzzle, "Standard", true)
+ check(board.grid and ui.timed.Visible, "Board builds with optional game headings absent")
+ board:Build(puzzle, "Hardcore", true)
+ check(board.mode == "Hardcore" and board.grid, "Hardcore board supports the simplified authored Game hierarchy")
+end)()
+
+;(function()
+ ui.scoreText, ui.scoreLevel = bindings.scoreText, bindings.scoreLevel
+ check(ui.scoreText == scorePanel:FindFirstChild("Score") and ui.scoreLevel == scorePanel:FindFirstChild("Level"):FindFirstChild("Label"), "Score binds the exact authored Score.Score and Score.Level.Label")
+ board:Build(puzzle,"Standard",true)
+ check(ui.scoreText.Text == "Score: 0" and ui.scoreLevel.Text == "\u{1F451} Level 1", "New board resets the score and crown label")
+ board:Progress({{userId=1,foundWords={CAT=true},score=2400},{userId=2,foundWords={DOG=true},score=9999}})
+ local bronze = ui.scoreLevel.TextColor3
+ check(ui.scoreText.Text == "Score: 2400" and ui.scoreLevel.Text == "\u{1F451} Level 5", "Only the local server score controls the HUD")
+ board:Progress({{userId=1,foundWords={CAT=true},score=2500}})
+ check(ui.scoreLevel.Text == "\u{1F451} Level 6" and ui.scoreLevel.TextColor3 ~= bronze, "Level six changes the crown colour band")
+ board:UpdateScore(5000)
+ check(ui.scoreLevel.Text == "\u{1F451} Level 11", "Higher score advances the crown level")
+ board:Build(puzzle,"Mini",true)
+ check(ui.scoreText.Text == "Score: 0" and ui.scoreLevel.Text == "\u{1F451} Level 1", "Switching modes resets both score labels")
+end)()
+
+;(function()
+ local effects = shared.ui.UIEffects
+ for _, preview in ipairs({{5,rbx.Color3.fromRGB(88,224,255)},{3,rbx.Color3.fromRGB(119,222,176)}}) do
+  local width, color = preview[1], preview[2]
+  local host = add(assets,"Frame","PreviewHome")
+  local frame = add(host,"Frame","Frame1")
+  local tiles = {}
+  for index=1,width*width do
+   tiles[index] = add(frame,index == 1 and "ImageLabel" or "Frame",index%2==0 and tostring(index) or "tile"..index)
+   add(tiles[index],"TextLabel","Letter").Text = "A"
+  end
+  local animation = effects.CreateHomeTilePreview(frame,width,color,0)
+  local seen, previous, paths, colored, faded = {}, "", 0, false, false
+  local idleFrames, longestIdle = 0, 0
+  for tick=1,2400 do
+   animation:Step(1/60,true) advance(1/60)
+   if #animation.path > 0 then
+    idleFrames = 0
+    local signature = table.concat(animation.path,":")
+    if signature ~= previous then
+     paths += 1 previous = signature seen[signature] = true
+     check(width==3 and #animation.path==3 or width==5 and (#animation.path==5 or #animation.path==6),"Mini uses exactly three tiles; Standard uses five or six")
+     local visited = {}
+     for index,cell in ipairs(animation.path) do
+      check(cell>=1 and cell<=width*width and not visited[cell],"Preview path uses unique in-bounds cells")
+      visited[cell] = true
+      if index > 1 then
+       local prior = animation.path[index-1]
+       check(math.abs(math.floor((cell-1)/width)-math.floor((prior-1)/width))<=1 and math.abs((cell-1)%width-(prior-1)%width)<=1,"Preview path connects adjacent tiles, including diagonals")
+      end
+     end
+    end
+   else
+    idleFrames += 1 longestIdle = math.max(longestIdle,idleFrames)
+    local white = true
+    for _,tile in ipairs(tiles) do white = white and tile.BackgroundColor3 == rbx.Color3.new(1,1,1) end
+    faded = faded or (paths>0 and white)
+   end
+   for _,tile in ipairs(tiles) do colored = colored or tile.BackgroundColor3 == color end
+  end
+  check(paths>=10 and colored and faded and longestIdle<=1,"Each preview continuously loops without a long rest after fading white")
+  host.Visible = false
+  animation:Step(1/60,true) advance(1)
+  for _,tile in ipairs(tiles) do check(tile.BackgroundColor3==rbx.Color3.new(1,1,1) and tile:FindFirstChild("Letter").Text=="A","Hidden Home cancels color tweens without changing tile letters") end
+  host.Visible = true
+  animation:Step(1/60,true)
+  check(#animation.path>0,"Returning Home immediately resumes the path animation")
+  local replacement = effects.CreateHomeTilePreview(frame,width,color,0)
+  animation:Step(1,true)
+  check(#animation.path==0,"Rebinding stops the old preview controller")
+  replacement:Step(0.1,true) replacement:Destroy() advance(1)
+  replacement:Step(0.1,true)
+  check(#replacement.path==0 and tiles[1].ImageColor3==rbx.Color3.new(1,1,1),"Destroyed preview cannot restart or leave tinted images")
+  host:Destroy()
+ end
+ check(effects.CreateHomeTilePreview(nil,5,rbx.Color3.new(1,1,1))==nil,"Missing optional preview does not block Home")
+end)()
+
+;(function()
+ local effects = shared.ui.UIEffects
+ local host = add(assets,"Frame","JumboHome")
+ local frame = add(host,"Frame","Frame1")
+ local grid = add(frame,"UIGridLayout","UIGridLayout")
+ grid.CellSize, grid.CellPadding = rbx.UDim2.fromScale(0.3,0.3), rbx.UDim2.fromScale(0.03,0.03)
+ grid.FillDirection, grid.FillDirectionMaxCells, grid.SortOrder = rbx.Enum.FillDirection.Horizontal,0,rbx.Enum.SortOrder.Name
+ for i=1,9 do
+  local tile = add(frame,"Frame","Tile"..i) tile.LayoutOrder = 50+i
+  add(tile,"UICorner","UICorner")
+  add(tile,"UIStroke","UIStroke")
+ end
+ local firstTile=frame:FindFirstChild("Tile1")
+ firstTile.AnchorPoint,firstTile.Position,firstTile.Size=rbx.Vector2.new(0.2,0.3),rbx.UDim2.fromOffset(7,9),rbx.UDim2.fromScale(0.24,0.25)
+ local authoredScale=add(firstTile,"UIScale","AuthoredScale") authoredScale.Scale=0.93
+ local originalAnchor,originalPosition,originalTileSize=firstTile.AnchorPoint,firstTile.Position,firstTile.Size
+ local originalSize,originalPadding = grid.CellSize,grid.CellPadding
+ local function visibleCount()
+  local count=0
+  for _,tile in ipairs(frame:GetChildren()) do if tile:IsA("GuiObject") and tile.Visible then count+=1 end end
+  return count
+ end
+ local animation = effects.CreateJumboPreview(frame)
+ check(visibleCount()==9 and grid.FillDirectionMaxCells==3,"Jumbo starts with the authored nine tiles in a three-column grid")
+ check(frame:FindFirstChild("Tile36"):FindFirstChildOfClass("UIStroke") and frame:FindFirstChild("Tile36"):FindFirstChildOfClass("UICorner"),"Extra Jumbo tiles clone authored decoration")
+ local observed, morphs = {}, 0
+ local wasMorphing = false
+ for tick=1,2700 do
+  animation:Step(1/60,true) advance(1/60)
+  local count = visibleCount()
+  observed[count] = true
+  if tick<=700 then check(count==9 and grid.CellSize==originalSize,"Jumbo remains still during its long initial pause") end
+  check(count==9 or count==36,"Jumbo morphs directly between three-by-three and six-by-six")
+  local morphing = grid.Parent ~= frame
+  if morphing and not wasMorphing then
+   morphs += 1
+   check(grid.Parent.Name=="JumboLayoutParking","Grid layout is temporarily parked to avoid snapping moving tiles")
+   local moving = false
+   for _,tween in ipairs(tweenService.created) do
+    if tween.node==frame:FindFirstChild("Tile2") and tween.properties.Position and tween.info.Time==1.6 then moving=true end
+   end
+   check(moving,"Existing tiles glide to their next positions over a smooth 1.6-second tween")
+  end
+  wasMorphing=morphing
+  if count==36 and not morphing then
+   check(grid.FillDirectionMaxCells==6 and math.abs(grid.CellSize.X.Scale-0.1475)<0.00001 and math.abs(grid.CellPadding.X.Scale-0.015)<0.00001,"Settled six-by-six keeps the original footprint and restores layout ownership")
+   check(not frame:FindFirstChild("Tile35"):FindFirstChildOfClass("UIScale") and authoredScale.Scale==0.93,"Temporary scales are removed and authored scale is restored when tiles settle")
+  end
+ end
+ check(observed[9] and observed[36] and morphs>=2,"Jumbo smoothly grows and shrinks without intermediate layout snaps")
+ -- Interrupt an active morph, rather than only testing cleanup during a rest.
+ for _=1,1600 do
+  animation:Step(1/60,true) advance(1/60)
+  if grid.Parent~=frame then break end
+ end
+ check(grid.Parent~=frame,"Cleanup fixture reaches a moving grid")
+ host.Visible=false
+ animation:Step(1/60,true) advance(1)
+ check(visibleCount()==9 and grid.Parent==frame and grid.CellSize==originalSize and grid.CellPadding==originalPadding,"Hidden Home cancels active tile tweens, reattaches layout and resets Jumbo")
+ host.Visible=true
+ local replacement = effects.CreateJumboPreview(frame)
+ local tiles=0
+ for _,tile in ipairs(frame:GetChildren()) do if tile:IsA("GuiObject") then tiles+=1 end end
+ check(tiles==36,"Rebinding cannot accumulate extra Jumbo clones")
+ animation:Step(1,true)
+ replacement:Destroy() advance(1)
+ check(visibleCount()==9 and not frame:FindFirstChild("Tile10") and frame:FindFirstChild("Tile1").LayoutOrder==51,"Cleanup removes generated tiles and restores authored ordering")
+ check(firstTile.AnchorPoint==originalAnchor and firstTile.Position==originalPosition and firstTile.Size==originalTileSize and authoredScale.Parent==firstTile and authoredScale.Scale==0.93,"Jumbo teardown restores authored geometry and scale")
+ check(grid.Parent==frame and grid.CellSize==originalSize and grid.CellPadding==originalPadding and grid.FillDirectionMaxCells==0 and grid.SortOrder==rbx.Enum.SortOrder.Name and not frame:FindFirstChild("JumboLayoutParking"),"Cleanup restores authored layout and removes temporary parking")
+ host:Destroy()
+ check(effects.CreateJumboPreview(nil)==nil,"Missing optional Jumbo preview leaves Home usable")
+end)()
+;(function()
+ local controller=MetaController.new({getSnapshot=function() return {hints=0} end})
+ controller.remotes={}
+ local finished=signal()
+ services.MarketplaceService.PromptProductPurchaseFinished=finished
+ controller:connectRemoteEvents()
+ local before=#prompts
+ controller:promptHintPurchase()
+ check(controller.hintPurchasePending and #prompts==before+1 and prompts[#prompts]==3714515983 and not controller.elements.shopFrame,"Hint prompts the new product without an authored Shop")
+ controller:promptHintPurchase()
+ check(#prompts==before+1,"Repeated taps cannot duplicate a pending hint prompt")
+ for _,fn in ipairs(finished.callbacks) do fn(999,3714515983,false) fn(players.LocalPlayer.UserId,3573028208,false) end
+ check(controller.hintPurchasePending,"Other players and products cannot clear the active hint prompt")
+ for _,fn in ipairs(finished.callbacks) do fn(players.LocalPlayer.UserId,3714515983,false) end
+ check(not controller.hintPurchasePending,"Cancelling the matching prompt releases input")
+ controller:promptHintPurchase()
+ for _,fn in ipairs(finished.callbacks) do fn(players.LocalPlayer.UserId,3714515983,true) end
+ check(#prompts==before+2 and not controller.hintPurchasePending,"Successful prompt closes without granting hints on the client")
+ local prompt=services.MarketplaceService.PromptProductPurchase
+ services.MarketplaceService.PromptProductPurchase=function() error("Prompt unavailable") end
+ controller:promptHintPurchase()
+ check(not controller.hintPurchasePending,"Prompt errors release the guard so a later click can retry")
+ services.MarketplaceService.PromptProductPurchase=prompt
+ controller:promptHintPurchase()
+ check(controller.hintPurchasePending and #prompts==before+3,"Native prompt recovers after an error")
+ controller:destroy()
+ check(not controller.hintPurchasePending,"Controller teardown cannot leave the purchase input lock behind")
+end)()
+;(function()
+ for _,mode in ipairs({"Standard","Mini","Jumbo","Hardcore","Timed","Tutorial"}) do
+  board:Build(puzzle,"Duel")
+  check(ui.timed.Position==rbx.UDim2.fromScale(0.5,0.03),"Repeated Duel entry keeps the requested timer position")
+  board:Build(puzzle,mode)
+  check(ui.timed.Visible and ui.timed.Position==rbx.UDim2.new(0.47,8,0.11,-3),"Leaving Duel restores the authored timer position, including offsets, in "..mode)
+ end
+end)()
+;(function()
+ local generator=require("../src/shared/puzzle/PuzzleGenerator")
+ local practice=generator.Generate(generator.BuildTutorialDefinition(1),1)
+ board:Build(practice,"Standard",true) advance(1)
+ board:Progress({{userId=1,foundWords={CAT=true},hintedWords={DOG=true}}}) advance(0.5)
+ local solvedColor=board.wordColors.CAT
+ local hintPulse=board.hintPulses.DOG
+ board:ActivateCell({row=1,column=1})
+ board:MoveToCell({row=2,column=1})
+ board:MoveToCell({row=3,column=1})
+ board:Finish()
+ check(board.grid:FindFirstChild("WrongWordFeedback") and board.found.CAT and board.wordColors.CAT==solvedColor
+  and board.hintPulses.DOG==hintPulse,"Error feedback preserves solved word colors and the existing hint pulse")
+ board:ActivateCell({row=1,column=3})
+ check(not board.grid:FindFirstChild("WrongWordFeedback") and board.startCell,"Keyboard selection immediately replaces old error feedback")
+ advance(0.5)
+ check(board.startCell and board.found.CAT and board.hintPulses.DOG==hintPulse,"Cancelled error callbacks cannot disturb the new gesture, solved word or hint")
+ board:Cancel()
+ board:ActivateCell({row=1,column=1}) board:MoveToCell({row=2,column=1}) board:MoveToCell({row=3,column=1}) board:Finish()
+ local oldFeedback=board.grid:FindFirstChild("WrongWordFeedback")
+ check(oldFeedback~=nil,"Fixture produces another invalid path")
+ board:Build(practice,"Standard",true) advance(1)
+ check(not oldFeedback.Parent and not board.grid:FindFirstChild("WrongWordFeedback") and not board.cancelWrongFeedback,"Rebuilding removes the entire flash and invalidates its scheduled animation")
+end)()
 print("BOARD_PRESENTATION_TESTS_PASSED=" .. checks)

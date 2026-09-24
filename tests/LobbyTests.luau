@@ -3,7 +3,7 @@ local luau = require("@lune/luau")
 local rbx = require("@lune/roblox")
 local Config = require("../src/shared/config/ProgressionConfig")
 local Contract = require("../src/shared/network/NetworkContract")
-local checks = 0
+local checks, serverNow, displayedRemaining, displayedLimit = 0, 0, nil, nil
 local function check(value, reason) assert(value, reason) checks += 1 end
 local function signal()
 	local s = { callbacks = {} }
@@ -26,9 +26,10 @@ local function node(children, class)
 end
 local function button() return node({ Activated = signal(), TextLabel = node({Text=""}, "TextLabel") }, "TextButton") end
 local ui = { home = node({Visible=true}), game = node({Visible=false}), queue = node({Visible=false}), pause = node({Visible=false}),
-	modes = node(), buttonBar = node(), play = button(), queueLeave = button(), queueSolo = button(), exit = button(), resume = button(), leaveRound = button(), hint = button(),
-	waiting = node(), queueSubtitle = node(), subtitle = node(), hintCount = node(), hintBadge = node() }
+	modes = node(), buttonBar = node(), play = button(), queueLeave = button(), queueSolo = button(), resume = button(), leaveRound = button(), hint = button(),
+	waiting = node(), queueSubtitle = node(), hintCount = node(), hintBadge = node() }
 ui.home.SelectModeLabel = node({Text=""})
+ui.frames = node() -- Current authored HUD has no Shop frame.
 ui.buttonBar.Duel = button()
 for mode in pairs(Config.Experience.ModeLevels) do
 	ui.modes[mode] = node({Play=button()})
@@ -68,8 +69,8 @@ local folder = node({[Contract.QueueAction]=action, [Contract.QueueUpdated]={OnC
 	[Contract.StateUpdated]={OnClientEvent=stateSignal}, [Contract.GetBootstrap]={InvokeServer=function() return snapshot end},
 	[Contract.UseHint]={}, [Contract.TutorialAction]={}})
 local board = {tiles={{{}}}, callbacks=nil}
-function board:Cancel() end
-function board:Build(puzzle, mode) self.puzzle,self.mode,self.completed=puzzle,mode,false self.found,self.hinted={},{} end
+function board:Cancel() self.startCell = nil end
+function board:Build(puzzle, mode) self.puzzle,self.mode,self.completed=puzzle,mode,false self.found,self.hinted,self.timeExpired={},{},false end
 function board:Progress(members) self.members=members end
 function board:DuelPlayers(userId, _, _, mine, theirs) self.opponentId=userId self.myStats,self.opponentStats=mine,theirs end
 function board:DuelWinRates(mine, theirs) self.myStats,self.opponentStats=mine,theirs end
@@ -84,13 +85,20 @@ local function finishOutcomeDelay()
 	outcomeDelays = {}
 	for _, callback in ipairs(callbacks) do callback() end
 end
+local purchasePrompts = {}
 local meta = {bind=function() end,applySnapshot=function() end,
+	queueVerifyPrompt=function() end,
+	elements={},
+	promptHintPurchase=function(self) if not self.hintPurchasePending then self.hintPurchasePending=true table.insert(purchasePrompts,3714515983) end end,
+	showFrame=function(_, frame) frame.Visible=true end,
+	setModalFrameVisible=function(_, frame, visible) frame.Visible=visible end,
 	showGameOutcome=function(_, result, profile) table.insert(shownOutcomes, {result=result, profile=profile}) end}
-local tutorial = {Start=function() end,IsActive=function() return false end}
+local tutorial = {Tick=function() end,Start=function() end,IsActive=function() return false end}
 local controllers = node({
-	InterfaceController={Bind=function() return ui end,UpdateLevelBars=function() end,
+	InterfaceController={Bind=function() return ui end,UpdateLevelBars=function() end,StepHomePreviews=function() end,
+		UpdateTimedTimer=function(_,remaining,limit) displayedRemaining,displayedLimit=remaining,limit end,
 		UpdateQueue=function(_, members) ui.queueMembers=members end,
-		UpdateQueueTimer=function(_, seconds) ui.queueSubtitle.Text="Classic Mode ("..math.max(0,math.ceil(seconds)).."s)" end},
+		UpdateQueueTimer=function(_, seconds) ui.queueSubtitle.Text="Standard Mode ("..math.max(0,math.ceil(seconds)).."s)" end},
 	BoardController={new=function(_, callbacks) board.callbacks=callbacks return board end},
 	ProgressionController={new=function(context) outcomeContext=context return meta end},
 })
@@ -113,11 +121,11 @@ end, TransitionToHome=function(_, gameFrame, covered, complete)
 	local current=homeTransition
 	return function() current.cancelled=true end
 end}
+effects.CreateHintWobble = function() return {Step=function() end} end
 effects.TransitionToQueue = effects.TransitionToGame
 local shared = node({ui=node({UIEffects=effects}),config=node({ProgressionConfig=Config,GameConfig=require("../src/shared/config/GameConfig")}),network=node({NetworkContract=Contract})})
-local purchasePrompts = {}
 local services = {StarterPlayer=node({StarterPlayerScripts={}}),Players={LocalPlayer=player},ReplicatedStorage=node({shared=shared,[Contract.FolderName]=folder}),
-	UserInputService={GetLastInputType=function() return "MouseButton1" end},RunService={Heartbeat=signal()},Workspace={GetServerTimeNow=function() return 0 end},
+	UserInputService={GetLastInputType=function() return "MouseButton1" end},RunService={Heartbeat=signal()},Workspace={GetServerTimeNow=function() return serverNow end},
 	SoundService=node(),GuiService={},MarketplaceService={PromptProductPurchase=function(_, _, id) table.insert(purchasePrompts, id) end}}
 local controller = luau.load(fs.readFile("src/client/controllers/GameController.luau"), {environment={
 	Color3=rbx.Color3, UDim2=rbx.UDim2, Enum=rbx.Enum,
@@ -127,8 +135,20 @@ local controller = luau.load(fs.readFile("src/client/controllers/GameController.
 }})()
 controller.Start()
 check(not hud.Enabled, "Main waits for intro")
+check(not outcomeContext.canShowVerifyPrompt() and not outcomeContext.hasCompletedFirstPuzzle(), "Verify waits for startup and a normal puzzle completion")
 introDone()
 check(hud.Enabled, "Main enables after intro")
+check(outcomeContext.canShowVerifyPrompt(), "Ready unobstructed Home permits a queued Verify prompt")
+do
+	local originalUserId = player.UserId
+	player.UserId = 1790165114
+	check(not outcomeContext.isVerifyPromptTestUser(), "Owner prompt override waits for tutorial to finish")
+	tutorial.finished = true
+	check(outcomeContext.isVerifyPromptTestUser(), "Configured owner gets the post-tutorial Verify override")
+	player.UserId = originalUserId
+	check(not outcomeContext.isVerifyPromptTestUser(), "Ordinary players never receive the owner override")
+	tutorial.finished = false
+end
 local before = #requests
 ui.modes.Mini.Play.Activated:Fire()
 check(#requests == before, "Locked Mini does not send a solo request")
@@ -153,7 +173,8 @@ for _, mode in ipairs({"Mini","Jumbo","Hardcore"}) do
 	check(#requests==requestCount, "Second solo click cannot interrupt entry")
 	check(transition.covered()==ui.game and board.mode==mode and not ui.home.Visible, "Solo board mounts under white")
 	check(not board.callbacks.canInteract(), "Solo reveal locks input")
-	ui.exit.Activated:Fire()
+	check(not outcomeContext.canShowVerifyPrompt(), "Verify cannot interrupt a puzzle entrance")
+	ui.leaveRound.Activated:Fire()
 	check(#requests==requestCount, "Exit cannot interrupt the entrance")
 	transition.complete(true)
 	check(board.callbacks.canInteract(), "Solo accepts input once reveal finishes")
@@ -164,33 +185,39 @@ for _, mode in ipairs({"Mini","Jumbo","Hardcore"}) do
 	local promptCount, beforeEmptyHint = #purchasePrompts, #requests
 	snapshot.hints = 0
 	ui.hint.Activated:Fire()
-	check(#purchasePrompts == promptCount + 1 and purchasePrompts[#purchasePrompts] == 3573028208 and #requests == beforeEmptyHint, "Empty gameplay Hint prompts only the single-hint product")
+	check(not ui.frames.Shop and #purchasePrompts == promptCount+1 and purchasePrompts[#purchasePrompts]==3714515983 and #requests == beforeEmptyHint, "Empty Hint directly prompts the new product without a Shop frame or hint request")
+	check(ui.game.Visible and not board.callbacks.canInteract(), "Native hint prompt keeps the puzzle visible and blocks board input")
+	ui.hint.Activated:Fire()
+	check(#purchasePrompts == promptCount+1 and #requests == beforeEmptyHint, "Repeated hint taps cannot open overlapping purchase prompts")
+	meta.hintPurchasePending = false
+	check(board.callbacks.canInteract(), "Closing the purchase prompt restores interaction with the current puzzle")
 	snapshot.hints = 1
 	ui.hint.Activated:Fire()
-	check(#purchasePrompts == promptCount + 1 and requests[#requests].action == "Hint", "Owned hints use gameplay validation without a purchase prompt")
+	check(#purchasePrompts == promptCount+1 and requests[#requests].action == "Hint", "Owned hints use gameplay validation without another purchase prompt")
 	pauseInput()
 	check(ui.pause.Visible and not board.callbacks.canInteract(), "Manual pause remains available")
 	ui.resume.Activated:Fire()
 	check(not ui.pause.Visible and board.callbacks.canInteract(), "Resume stays on current board")
 	if mode == "Hardcore" then
 		board.callbacks.invalidSelection({{row=1,column=1},{row=2,column=1}})
-		check(board.completed and ui.subtitle.Text == "Wrong word! Leave to try again.", "Hardcore failure locks board and explains return")
+		finishOutcomeDelay()
+		check(board.completed and shownOutcomes[#shownOutcomes].result.failed, "Hardcore failure opens results without needing an Exit or Subtitle")
 	end
 	local oldId = activeRound.id
 	if mode == "Mini" then
 		failExit=true
 		local exits=homeTransitionCount
-		ui.exit.Activated:Fire()
+		ui.leaveRound.Activated:Fire()
 		check(homeTransitionCount==exits and ui.game.Visible and activeRound.id==oldId and board.callbacks.canInteract(), "Rejected Exit keeps the current board usable")
 		failExit=false
 	end
-	if mode == "Hardcore" then pauseInput() ui.leaveRound.Activated:Fire()
-	else ui.exit.Activated:Fire() end
+	if mode == "Hardcore" then outcomeContext.onOutcomeHome(oldId)
+	else ui.leaveRound.Activated:Fire() end
 	check(requests[#requests].action=="Exit" and requests[#requests].roundId==oldId and activeRound==nil, "Exit releases the exact server round")
 	check(homeTransition.gameFrame==ui.game and ui.game.Visible and not ui.pause.Visible and not ui.home.Visible, "Exit reverses Game before switching to Home")
 	check(not board.callbacks.canInteract(), "Outgoing board is locked")
 	requestCount=#requests
-	ui.exit.Activated:Fire()
+	ui.leaveRound.Activated:Fire()
 	ui.leaveRound.Activated:Fire()
 	ui.hint.Activated:Fire()
 	check(#requests==requestCount, "Duplicate Exit and Hint cannot race outgoing animation")
@@ -207,15 +234,15 @@ local duelPayload={matchId="duel1",opponentId=2,opponentName="Bob",puzzleData={w
 local entries=transitionCount
 duelContext.onCountdown(duelPayload)
 check(transitionCount==entries+1 and ui.home.Visible and not ui.game.Visible, "Duel countdown uses the same white entrance")
-duelContext.onProgress({matchId="duel1",myFoundWords={CAT=true},opponentFoundWords={DOG=true}})
+duelContext.onProgress({matchId="duel1",myScore=300,myFoundWords={CAT=true},opponentFoundWords={DOG=true}})
 duelContext.onStart(duelPayload)
 check(not board.callbacks.canInteract(), "Early Duel start does not unlock transition")
 check(transition.covered()==ui.game and board.mode=="Duel" and board.opponentId==2, "Duel board and mugshots mount under white")
 check(board.myStats.wins == 3 and board.opponentStats.losses == 3, "Countdown records reach the correct HUD labels")
-check(board.members[1].foundWords.CAT and board.members[2].foundWords.DOG and board.scores[1]==1 and board.scores[2]==1, "Duel progress during fade is replayed with scores")
+check(board.members[1].score == 300 and board.members[1].foundWords.CAT and board.members[2].foundWords.DOG and board.scores[1]==1 and board.scores[2]==1, "Duel progress during fade is replayed with scores")
 transition.complete(true)
 check(board.callbacks.canInteract(), "Started Duel unlocks after entrance")
-ui.exit.Activated:Fire()
+ui.leaveRound.Activated:Fire()
 check(abandoned==1 and homeTransition.gameFrame==ui.game, "Duel Exit abandons match and reverses Game")
 local oldMembers=board.members
 duelContext.onProgress({matchId="duel1",myFoundWords={},opponentFoundWords={}})
@@ -230,7 +257,7 @@ queueRevision += 1
 queueSignal:Fire({revision=queueRevision,count=2,deadline=15,members={{userId=1,level=20},{userId=2,level=4}}})
 transition.complete(true)
 check(requests[#requests].action == "Join" and ui.queue.Visible and ui.waiting.Text == "2 Waiting" and #ui.queueMembers == 2, "Queue entrance applies the latest roster received during its fade")
-check(ui.queueSubtitle.Text == "Classic Mode (15s)" and ui.queueMembers[1].level == 20, "Authored queue receives cards and countdown")
+check(ui.queueSubtitle.Text == "Standard Mode (15s)" and ui.queueMembers[1].level == 20, "Authored queue receives cards and countdown")
 local firstQueuedRoster=ui.queueMembers
 queueRevision += 1
 queueSignal:Fire({revision=queueRevision,count=0,members={}})
@@ -249,7 +276,7 @@ check(board.members[1].foundWords.CAT and #ui.queueMembers==0, "Progress during 
 check(not board.callbacks.canInteract(), "Gameplay waits for reveal to finish")
 transition.complete(true)
 check(board.callbacks.canInteract(), "Gameplay unlocks after panel reveal")
-ui.exit.Activated:Fire()
+ui.leaveRound.Activated:Fire()
 check(homeTransition.gameFrame==ui.game and ui.game.Visible, "Standard Exit also reverses the game")
 finishExit()
 ui.play.Activated:Fire()
@@ -282,7 +309,7 @@ check(shownDuelOutcomes[1].beforeProgression and shownDuelOutcomes[1].beforeProg
 duelContext.onResult({matchId="duel2"})
 finishOutcomeDelay()
 check(#shownDuelOutcomes == 1, "Duplicate results do not reopen the outcome")
-ui.exit.Activated:Fire()
+ui.leaveRound.Activated:Fire()
 local cancelledExit=homeTransition
 duelPayload.matchId="duel3"
 duelContext.onCountdown(duelPayload)
@@ -341,6 +368,7 @@ for _, mode in ipairs({"Standard", "Mini", "Jumbo", "Hardcore"}) do
 	local result = shownOutcomes[#shownOutcomes].result
 	check(result.beforeProgression and result.beforeProgression ~= snapshot.progression and result.beforeProgression.level == snapshot.progression.level, "Outcome carries a detached snapshot of progress captured at round entry")
 	check(#shownOutcomes == beforeOutcome + 1 and result.mode == mode and result.theme == "Animals" and result.xpEarned == 180, "Outcome shows authoritative completion for each normal mode")
+	check(outcomeContext.hasCompletedFirstPuzzle() and not outcomeContext.canShowVerifyPrompt(), "First normal completion qualifies Verify while the result board still blocks presentation")
 	roundSignal:Fire(completedPacket())
 	finishOutcomeDelay()
 	check(#shownOutcomes == beforeOutcome + 1, "Repeated round packets cannot reopen the dismissed outcome")
@@ -366,14 +394,14 @@ for _, mode in ipairs({"Standard", "Mini", "Jumbo", "Hardcore"}) do
 	transition.covered()
 	check(not ui.home.Visible and (mode == "Standard" and ui.queue.Visible or mode ~= "Standard" and ui.game.Visible), "Replay mounts Queue or the next solo board without exposing Home")
 	transition.complete(true)
-	if mode == "Standard" then ui.queueLeave.Activated:Fire() else ui.exit.Activated:Fire() end
+	if mode == "Standard" then ui.queueLeave.Activated:Fire() else ui.leaveRound.Activated:Fire() end
 	finishExit()
 end
 launchOutcomeMode("Mini")
 transition.complete(true)
 local beforeDismissed = #shownOutcomes
 roundSignal:Fire(completedPacket())
-ui.exit.Activated:Fire()
+ui.leaveRound.Activated:Fire()
 finishOutcomeDelay()
 check(#shownOutcomes == beforeDismissed, "Leaving during the final-word delay prevents a stale popup")
 finishExit()
@@ -414,7 +442,31 @@ ui.queueSolo.Activated:Fire()
 check(requests[#requests].action == "StartSolo" and requests[#requests].mode == "Standard" and transitionCount == soloTransitionCount + 1, "Queue Solo starts a direct Classic game transition")
 transition.covered() transition.complete(true)
 check(ui.game.Visible and not ui.queue.Visible and not ui.home.Visible, "Queue Solo enters Game without visiting Home")
-ui.exit.Activated:Fire()
+ui.leaveRound.Activated:Fire()
 finishExit()
 
+
+do
+ ui.modes.Mini.Play.Activated:Fire()
+ transition.covered() transition.complete(true)
+ activeRound.timeLimit, activeRound.expiresAt = 90, 90
+ serverNow = 25
+ services.RunService.Heartbeat:Fire(1/60)
+ check(displayedRemaining == 65 and displayedLimit == 90 and board.callbacks.canInteract(), "Game HUD counts from server deadline while keeping live input")
+ ui.pause.Visible = true
+ serverNow = 70
+ services.RunService.Heartbeat:Fire(1/60)
+ check(displayedRemaining == 20, "Pause does not suspend the server countdown")
+ ui.pause.Visible = false
+ board.startCell = {}
+ serverNow = 90
+ services.RunService.Heartbeat:Fire(1/60)
+ check(displayedRemaining == 0 and board.timeExpired and not board.startCell and not board.callbacks.canInteract(), "At zero the client cancels dragging and blocks new input immediately")
+ local before = #shownOutcomes
+ roundSignal:Fire({id=activeRound.id,mode="Mini",revision=1,members={{userId=1,failed=true,timedOut=true,count=0,xpEarned=0,duration=90}}})
+ finishOutcomeDelay()
+ check(#shownOutcomes == before+1 and shownOutcomes[#shownOutcomes].result.timedOut, "Authoritative timeout opens one partial-results outcome")
+ outcomeContext.onOutcomeHome(activeRound.id)
+ finishExit()
+end
 print("LOBBY_TESTS_PASSED=" .. checks)

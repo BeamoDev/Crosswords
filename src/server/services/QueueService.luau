@@ -198,6 +198,7 @@ local function startCohort(members, manager, privateOwner)
 	if not hasHuman(present) then manager:Release(present, Workspace:GetServerTimeNow()) return end
 	local round = QueueState.NewRound(HttpService:GenerateGUID(false), puzzle, present)
 	round.startedAt = os.clock()
+	round:SetTimer(Workspace:GetServerTimeNow(), GameConfig.RoundSeconds[round.mode])
 	round.botOwner, round.beginner = manager, privateOwner ~= nil
 	if privateOwner and privateQueues[privateOwner] then privateQueues[privateOwner].round = round end
 	rounds[round.id] = round
@@ -208,8 +209,24 @@ local function startCohort(members, manager, privateOwner)
 	sendRound(round, true)
 end
 
+local function expireRound(round, now)
+	local expired = round:Expire(now)
+	if #expired == 0 then return end
+	for _, userId in ipairs(expired) do
+		local member = round.members[userId]
+		local player = not member.isBot and Players:GetPlayerByUserId(userId)
+		if player then
+			DataService.RecordModeOutcome(DataService.GetMutableData(player), round.mode, false)
+			publishProfile(player)
+		end
+	end
+	if not hasUnfinishedHuman(round.members) then round.botOwner:Release(round:Snapshot(false).members, now, round) end
+	sendRound(round, false)
+end
+
 local function drainDue()
 	local now = Workspace:GetServerTimeNow()
+	for _, round in pairs(rounds) do expireRound(round, now) end
 	local changed, changedRounds = bots:Step(#Players:GetPlayers(), queue, now)
 	if changed then sendQueue() end
 	for round in pairs(changedRounds) do
@@ -301,6 +318,7 @@ local function handle(player, payload)
 			{ userId = player.UserId, name = player.Name, displayName = player.DisplayName },
 		}, payload.mode)
 		round.startedAt = os.clock()
+		round:SetTimer(Workspace:GetServerTimeNow(), GameConfig.RoundSeconds[round.mode])
 		round.botOwner, round.solo = bots, true
 		if leftQueue then sendQueue() end
 		rounds[round.id], playerRounds[player.UserId] = round, round
@@ -324,7 +342,13 @@ local function handle(player, payload)
 	if action == "Word" then
 		local accepted, completed = round:FindWord(player.UserId, payload.word, payload.path)
 		if not accepted then
+			local bonus = round:FindBonusWord(player.UserId, payload.path)
+			if bonus then
+				sendRound(round, false)
+				return {success = true, bonusWord = bonus, round = round:Snapshot(false)}
+			end
 			if round:FailSelection(player.UserId, payload.path) then
+				member.duration = math.max(0, os.clock() - round.startedAt)
 				DataService.RecordModeOutcome(data, round.mode, false)
 				sendRound(round, false)
 				return { success = false, round = round:Snapshot(false), snapshot = publishProfile(player) }
@@ -337,6 +361,7 @@ local function handle(player, payload)
 		member.xpEarned += wordXp
 		if completed then
 			member.duration = math.max(0, os.clock() - round.startedAt)
+			member.score += Config.Score.Completion(member.duration, round.timeLimit)
 			DataService.RecordModeOutcome(data, round.mode, true)
 			DataService.AddExperience(player, Config.Experience.CompletionBonus)
 			member.xpEarned += Config.Experience.CompletionBonus

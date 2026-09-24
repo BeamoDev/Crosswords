@@ -409,10 +409,10 @@ end
 function Duels:updateOutcome(snapshot)
 	local result, frame = self.outcomeResult, self.elements.outcomeFrame
 	if not result or not frame then return end
-	setText(self.elements.outcomeTitle, result.isWinner and "YOU WON!" or "YOU LOST!")
+	setText(self.elements.outcomeTitle, result.isDraw and "DRAW!" or result.isWinner and "YOU WON!" or "YOU LOST!")
 	setVisible(self.elements.winnerIcon, result.isWinner == true)
-	setVisible(self.elements.loserIcon, result.isWinner ~= true)
-	setText(frame:FindFirstChild("LevelTheme"), tostring(result.theme or "Word Search") .. " | 1v1")
+	setVisible(self.elements.loserIcon, not result.isDraw and result.isWinner ~= true)
+	setText(frame:FindFirstChild("LevelTheme"), tostring(result.theme or "Strands") .. " | 1v1")
 	if Interface.UpdateOutcome(frame, snapshot and snapshot.progression) then return end
 	setText(frame:FindFirstChild("Words"), Interface.OutcomeWords(result.foundCount or 0, result.wordCount or 0, result.duration))
 	setText(frame:FindFirstChild("XPWon"), string.format("+%d XP", result.xpEarned or 0))

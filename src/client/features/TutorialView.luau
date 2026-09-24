@@ -110,7 +110,49 @@ function View:Start()
 	end
 	self.frame.Visible = true
 	self.frame.AnchorPoint = self.original.anchor
-	self.render = RunService.RenderStepped:Connect(function() self:Layout() end)
+	self.render = RunService.RenderStepped:Connect(function(dt) self:Layout() self:UpdateDragGuide(dt or 0) end)
+end
+
+-- Passive pointer demonstration follows the canonical cells at the current viewport size.
+function View:SetDragGuide(grid, path, columns, rows, busy)
+	if self.dragImage then self.dragImage:Destroy() self.dragImage = nil end
+	self.dragGuide = nil
+	if not grid or not path or not self.root then return end
+	local image = Instance.new("ImageLabel")
+	image.Name, image.Image = "TutorialDragGuide", "rbxassetid://130798161958633"
+	image.BackgroundTransparency, image.ImageTransparency = 1, 1
+	image.Active, image.Selectable, image.Visible = false, false, false
+	image.AnchorPoint = Vector2.new(0.25, 0.15)
+	image.ZIndex, image.Parent = Z + 3, self.root
+	self.dragImage = image
+	self.dragGuide = {grid=grid, path=path, columns=columns, rows=rows, busy=busy, elapsed=0}
+end
+
+function View:UpdateDragGuide(dt)
+	local guide, image = self.dragGuide, self.dragImage
+	if not guide or not image then return end
+	if not guide.grid.Parent or not self.active then self:SetDragGuide(nil) return end
+	if self.typing or self.transitioning or not self.ui.game.Visible or (guide.busy and guide.busy()) then
+		image.Visible, guide.elapsed = false, 0
+		return
+	end
+	local travelEnd = 0.35 + (#guide.path - 1) * 0.7
+	local fadeStart = travelEnd + 0.4
+	guide.elapsed = (guide.elapsed + math.clamp(dt, 0, 0.1)) % (fadeStart + 1.4)
+	local elapsed = guide.elapsed
+	local position = math.clamp((elapsed - 0.35) / 0.7, 0, #guide.path - 1)
+	local index = math.min(#guide.path, math.floor(position) + 1)
+	local first, last = guide.path[index], guide.path[math.min(index + 1, #guide.path)]
+	local alpha = (1 - math.cos((position - math.floor(position)) * math.pi)) / 2
+	local column = first.column + (last.column - first.column) * alpha
+	local row = first.row + (last.row - first.row) * alpha
+	local size, origin = guide.grid.AbsoluteSize, guide.grid.AbsolutePosition - self.root.AbsolutePosition
+	local pixels = math.clamp(math.min(size.X / guide.columns, size.Y / guide.rows) * 0.55, 24, 72)
+	image.Size = UDim2.fromOffset(pixels, pixels)
+	image.Position = UDim2.fromOffset(origin.X + (column - 0.5) / guide.columns * size.X,
+		origin.Y + (row - 0.5) / guide.rows * size.Y)
+	image.ImageTransparency = elapsed < 0.25 and (1 - elapsed / 0.25) or math.clamp((elapsed - fadeStart) / 0.3, 0, 1)
+	image.Visible = image.ImageTransparency < 1
 end
 
 function View:LayoutCorners(opening, padding)
@@ -163,7 +205,7 @@ function View:Layout(placeWhileHidden)
 		self.cover.Position, self.cover.Size = UDim2.fromScale(0, 0), UDim2.fromScale(1, 1)
 		self.cover.Visible = true
 	end
-	-- Freeze the position while shrinking/growing; relocate only at zero size.
+	-- Let the active transition own position while shrinking, growing or sliding.
 	if self.transitioning and not placeWhileHidden then return end
 	-- Recover the authored viewport independently of the extra dark coverage.
 	local viewport = size / (1 + 2 * OVERSCAN)
@@ -193,14 +235,15 @@ function View:Layout(placeWhileHidden)
 			right = extraRight, bottom = extraBottom, scale = self.scale and self.scale.Scale or 1 }
 	end
 	local fw, fh = frameSize.X + insetLeft + extraRight, frameSize.Y + insetTop + extraBottom
-	local x = hasTarget and target == self.ui.hint and 0.4 or 0.5
-	if hasTarget and x == 0.5 and not self.centered then
+	local hintStep = hasTarget and target == self.ui.hint
+	local x, y = 0.5, hintStep and 0.2 or 0.862
+	if hasTarget and not hintStep and not self.centered then
 		local left = viewport.X * 0.5 - frameSize.X * self.frame.AnchorPoint.X - insetLeft
 		local top = viewport.Y * 0.862 - frameSize.Y * self.frame.AnchorPoint.Y - insetTop
 		local tx, ty, tw, th = table.unpack(safeTarget)
 		if left < tx + tw and left + fw > tx and top < ty + th and top + fh > ty then x = 0.4 end
 	end
-	self.frame.Position = UDim2.fromScale(self.centered and 0.5 or x, 0.862)
+	self.frame.Position = UDim2.fromScale(self.centered and 0.5 or x, y)
 end
 
 function View:UpdateSelections()
@@ -232,6 +275,7 @@ end
 
 -- Keep the transparent input blocker while the normal screen transition runs.
 function View:Suspend()
+	self:SetDragGuide(nil)
 	self.frame.Visible = false
 	self.target, self.allowTarget, self.hasStep = nil, false, false
 	self:Layout(true)
@@ -243,9 +287,11 @@ function View:CancelTransition()
 	if self.scaleTween then self.scaleTween:Cancel() self.scaleTween = nil end
 end
 
-function View:TweenFrame(size, scale, duration, direction)
+function View:TweenFrame(size, scale, duration, direction, position)
 	local info = TweenInfo.new(duration, Enum.EasingStyle.Quad, direction)
-	local tween = TweenService:Create(self.frame, info, { Size = size })
+	local goal = { Size = size }
+	if position then goal.Position = position end
+	local tween = TweenService:Create(self.frame, info, goal)
 	self.frameTween = tween
 	if self.scale then
 		self.scaleTween = TweenService:Create(self.scale, info, { Scale = scale })
@@ -256,6 +302,7 @@ function View:TweenFrame(size, scale, duration, direction)
 end
 
 function View:Show(title, message, target, autoAdvance, allowTarget, focusTarget, centered)
+	self:SetDragGuide(nil)
 	if not self.active then return end
 	self:FinishTyping() -- invalidates the old typewriter and reading timer
 	self:CancelTransition()
@@ -264,6 +311,8 @@ function View:Show(title, message, target, autoAdvance, allowTarget, focusTarget
 	self:UpdateSelections()
 	local token = self.token
 	local hadStep = self.hasStep
+	local slide = self.ui.hint ~= nil and (target == self.ui.hint or self.target == self.ui.hint)
+	local previousPosition = self.frame.Position
 	self.hasStep = true
 	task.spawn(function()
 		if not self.active or token ~= self.token then return end
@@ -280,11 +329,13 @@ function View:Show(title, message, target, autoAdvance, allowTarget, focusTarget
 		self.paragraph.Text = message
 		self.paragraph.MaxVisibleGraphemes = 0
 		self:Layout(true)
+		local destination = self.frame.Position
+		if slide then self.frame.Position = previousPosition end
 		self.frame.Visible = true
 		self:FadeMask(target and 1 or 0, OPEN_TIME)
 		local openScale = self.scale and self.scale.Scale or 1
 		if self.scale then self.scale.Scale = 0 end
-		self:TweenFrame(self.original.size, openScale, OPEN_TIME, Enum.EasingDirection.Out)
+		self:TweenFrame(self.original.size, openScale, OPEN_TIME, Enum.EasingDirection.Out, slide and destination or nil)
 		if not self.active or token ~= self.token then return end
 		self.frameTween, self.scaleTween = nil, nil
 		self.transitioning, self.typing = false, true
@@ -394,6 +445,7 @@ function View:Celebrate()
 end
 
 function View:Close()
+	self:SetDragGuide(nil)
 	if self.cancelConfetti then self.cancelConfetti() self.cancelConfetti = nil end
 	self.active = false
 	self:FinishTyping()

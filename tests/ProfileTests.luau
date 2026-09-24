@@ -40,6 +40,15 @@ v18.version = 18
 v18.settings.DuelInvites = nil
 v18.settings.Music = false
 check(schema.Normalize(v18).settings.DuelInvites and not v18.settings.Music, "Version 18 adds default-On invites without resetting audio settings")
+
+do
+ local current = schema.CreateDefault()
+ current.progression.level, current.progression.xp, current.hints = 20, 1800, 37
+ schema.Normalize(current)
+ schema.Normalize(current)
+ check(current.progression.level == 20 and current.progression.xp == 1800 and current.hints == 37, "Repeated normalization preserves saved level, XP and hints under the doubled curve")
+ check(Config.Experience.RequiredForLevel(20) == 4800 and Config.Experience.HintsForLevel(20) == 1 and Config.Experience.HintsForLevel(21) == 0, "Doubled costs and alternating rewards continue beyond early levels")
+end
 local legacy = {version = 16, progression = {totalXp = 1840, giftClaimMilestone = 8, levelRewardsThrough = 4},
 	resources = {hintsAvailable = 7, puzzlePieces = 61}, stats = {boardsCleared = 20, modeResults = {Total = {wins = 22}, Duel = {wins = 4, losses = 3}}},
 	dailyReward = {currentStreak = 9, bestStreak = 20, lastClaimDay = 100}, settings = {SFX = false, Music = true},
@@ -85,6 +94,14 @@ for level = 1, 501 do
 		check(previous == level - 1 and remaining == experience.RequiredForLevel(previous) - 1, "Level boundary retains correct fractional XP")
 	end
 end
+local earnedHints = 0
+for level = 1, 510 do
+	local reward = experience.HintsForLevel(level)
+	check(reward == (level % 2 == 0 and 1 or 0), "Level rewards give one hint on even levels, including beyond the dictionary")
+	earnedHints += reward
+	check(experience.TotalHintRewards(level) == earnedHints, "Cumulative rewards match individual grants across all level boundaries")
+end
+check(experience.TotalHintRewards(10) == 5 and experience.TotalHintRewards(20) == 10, "New players earn five hints by level ten and ten by level twenty")
 -- Exercise the actual DataService against a mock serialized DataStore and Player hierarchy.
 local function node(class, name, parent)
 	local n = {ClassName = class, Name = name, Parent = parent, children = {}, attributes = {}}
@@ -142,9 +159,9 @@ check(data.version == 19 and data.progression.level == 4 and data.progression.xp
 local mirror = actor:FindFirstChild("Data")
 check(mirror:FindFirstChild("Hints"):IsA("IntValue") and mirror:FindFirstChild("Hints").Value == 7, "Hints is one replicated integer")
 check(#actor:FindFirstChild("leaderstats"):GetChildren() == 1 and actor:FindFirstChild("leaderstats"):FindFirstChild("Level").Value == 4, "Level is the only leaderstat")
-local gained = dataService.AddExperience(actor, 1760)
-check(data.progression.level == 6 and data.progression.xp == 100 and gained == 3 and data.hints == 10, "XP rolls over multiple levels and grants each hint reward once")
-check(dataService.AddExperience(actor, 0) == 0 and data.hints == 10, "Repeated snapshot/no XP cannot regrant hints")
+local gained = dataService.AddExperience(actor, 3460)
+check(data.progression.level == 6 and data.progression.xp == 100 and gained == 1 and data.hints == 8, "XP rolls over multiple levels and grants each reduced hint reward once without reclaiming existing hints")
+check(dataService.AddExperience(actor, 0) == 0 and data.hints == 8, "Repeated snapshot/no XP cannot regrant hints")
 dataService.RecordModeOutcome(data, "Standard", true)
 dataService.RecordModeOutcome(data, "Hardcore", false)
 dataService.RecordModeOutcome(data, "Duel", true)
@@ -153,7 +170,7 @@ check(data.progression.solves == 24 and data.progression.duel.wins == 5 and data
 dataService.RecordWordFound(data)
 dataService.RecordWordFound(data)
 local snapshot = dataService.GetSnapshot(actor)
-check(snapshot.hints == 10 and snapshot.inventory == nil and snapshot.stats == nil and snapshot.progression.xpToNextLevel == 1000, "Snapshot uses compact fields plus derived XP preview")
+check(snapshot.hints == 8 and snapshot.inventory == nil and snapshot.stats == nil and snapshot.progression.xpToNextLevel == 2000, "Snapshot uses compact fields plus derived XP preview")
 check(snapshot.persistence == nil and snapshot.account.processedReceipts == nil, "Client snapshot excludes receipt/session internals")
 check(snapshot.progression.wordsFound == 2 and mirror:FindFirstChild("Progression"):FindFirstChild("WordsFound").Value == 2, "Word count appears in snapshots and Player.Data.Progression")
 snapshot.progression.wordsFound = 999
@@ -162,7 +179,7 @@ snapshot.progression.duel.wins = 999
 check(data.progression.duel.wins == 5, "Client snapshots are isolated copies")
 check(dataService.SavePlayer(actor), "Save succeeds")
 local saved = serde.decode("json",records.player_1)
-check(saved.version == 19 and saved.hints == 10 and saved.persistence.snapshotVersion == nil and saved.stats == nil, "Serialized save stays compact")
+check(saved.version == 19 and saved.hints == 8 and saved.persistence.snapshotVersion == nil and saved.stats == nil, "Serialized save stays compact")
 failStore = true
 check(not dataService.SavePlayer(actor), "Save failure stays retryable")
 failStore = false
@@ -171,7 +188,7 @@ check(dataService.CompleteTutorial(actor, true) and not actor:GetAttribute("Tuto
 check(dataService.MarkFavouritePrompted(actor), "Favourite flag still persists")
 dataService.ReleasePlayer(actor)
 local reloaded = dataService.LoadPlayer(actor)
-check(reloaded.progression.level == 6 and reloaded.progression.xp == 100 and reloaded.hints == 10 and reloaded.account.favouritePrompted, "Rejoin preserves progression/rewards/flags without regranting")
+check(reloaded.progression.level == 6 and reloaded.progression.xp == 100 and reloaded.hints == 8 and reloaded.account.favouritePrompted, "Rejoin preserves progression/rewards/flags without regranting")
 check(saved.progression.wordsFound == 2 and reloaded.progression.wordsFound == 2, "Word count survives serialized save and rejoin")
 local newer = serde.decode("json",records.player_1) newer.persistence.sessionToken = "other-server"
 records.player_1 = serde.encode("json",newer)
@@ -215,11 +232,37 @@ for _, pack in ipairs({ {15, 3573028459}, {30, 3711566945} }) do
 	dataService.LoadPlayer(actor)
 	check(rewards.GrantProductPurchase(actor, productId, receipt).alreadyProcessed and dataService.GetMutableData(actor).hints == hintCount + amount, "New hint pack receipt stays idempotent after reload")
 end
+do
+ local product=GameConfig.Meta.DIRECT_HINT_PRODUCT
+ check(product.Id==3714515983 and product.Amount==1,"Direct Hint product is configured to grant one hint")
+ local before=dataService.GetMutableData(actor).hints
+ local receipt="direct-hint-receipt"
+ local result=rewards.GrantProductPurchase(actor,product.Id,receipt)
+ check(result.success and result.amount==1 and dataService.GetMutableData(actor).hints==before+1,"New direct product grants exactly one hint")
+ failStore=true
+ check(not dataService.SavePlayer(actor),"Unsaved direct hint receipt remains pending")
+ check(rewards.GrantProductPurchase(actor,product.Id,receipt).alreadyProcessed and dataService.GetMutableData(actor).hints==before+1,"Retried direct receipt cannot grant twice before save")
+ failStore=false
+ check(dataService.SavePlayer(actor),"Direct receipt and hint persist together after retry")
+ dataService.ReleasePlayer(actor) dataService.LoadPlayer(actor)
+ check(rewards.GrantProductPurchase(actor,product.Id,receipt).alreadyProcessed and dataService.GetMutableData(actor).hints==before+1,"Direct hint receipt stays idempotent after reload")
+ local legacy=rewards.GrantProductPurchase(actor,3573028208,"delayed-legacy-single-hint")
+ check(legacy.success and legacy.amount==1,"Older single-hint receipts still grant their original reward")
+end
 check(GameConfig.Meta.HINT_PRODUCT_IDS[25] == nil, "The repurposed fifteen-hint product cannot grant twenty-five")
+local beforeDaily = dataService.GetMutableData(actor).hints
+check(rewards.GetDailyRewardState(actor).nextRewardHints == 1, "Daily preview offers one hint")
 local firstDaily = rewards.ClaimDailyReward(actor)
 check(firstDaily.success and not rewards.ClaimDailyReward(actor).success, "Daily claim is once per UTC day")
+check(firstDaily.rewardHints == 1 and dataService.GetMutableData(actor).hints == beforeDaily + 1, "Daily claim grants exactly one hint without a duplicate grant")
 check(dataService.GetMutableData(actor).dailyReward.streak == 1 and firstDaily.state.streak == 1, "Daily streak uses the new field and resets after a missed day")
 local current = dataService.GetMutableData(actor)
+for _, streak in ipairs({4, 9, 29}) do
+	current.dailyReward.lastClaimDay, current.dailyReward.streak = math.floor(os.time() / 86400) - 1, streak
+	local beforeClaim = current.hints
+	local result = rewards.ClaimDailyReward(actor)
+	check(result.success and result.rewardHints == 1 and current.hints == beforeClaim + 1 and current.dailyReward.streak == streak + 1, "Long daily streaks still grant exactly one hint")
+end
 local pieceCost = GameConfig.Economy.GetHintPackCost(1)
 current.puzzlePieces = pieceCost
 local purchaseHintsBefore = current.hints
@@ -238,6 +281,26 @@ local savedSettings = dataService.LoadPlayer(actor).settings
 check(savedSettings.DuelInvites == false, "Invites Off survives a serialized rejoin")
 check(savedSettings.Music == false and savedSettings.SFX == false, "Off preferences persist through a serialized rejoin")
 check(rewards.ClaimGroupReward(actor).alreadyClaimed, "Migrated group claim cannot grant twice")
+do
+	local newcomer = node("Player", "NewGroupMember", players) newcomer.UserId = 80
+	local profile = dataService.LoadPlayer(newcomer)
+	local result = rewards.ClaimGroupReward(newcomer)
+	check(result.success and result.rewardHints == 1 and profile.hints == 1, "New group claim grants one hint")
+	check(rewards.ClaimGroupReward(newcomer).alreadyClaimed and profile.hints == 1, "Group claim remains once-only")
+	dataService.ReleasePlayer(newcomer)
+end
+do
+	local milestonePlayer = node("Player", "MilestonePlayer", players) milestonePlayer.UserId = 81
+	local profile = dataService.LoadPlayer(milestonePlayer)
+	profile.progression.level, profile.progression.xp, profile.hints = 9, 0, 37
+	check(dataService.GetSnapshot(milestonePlayer).progression.nextLevelRewardHints == 1, "Snapshot previews one hint at level ten")
+	check(dataService.AddExperience(milestonePlayer, experience.TotalForLevel(11) - experience.TotalForLevel(9)) == 1 and profile.hints == 38, "Crossing an even level grants one hint and preserves old inventory")
+	check(dataService.AddExperience(milestonePlayer, 0) == 0 and profile.hints == 38, "Milestone reward cannot repeat without advancing")
+	check(dataService.GetSnapshot(milestonePlayer).progression.nextLevelRewardHints == 1, "Snapshot returns to one hint after the milestone")
+	dataService.ReleasePlayer(milestonePlayer)
+	check(dataService.LoadPlayer(milestonePlayer).hints == 38, "Milestone grants survive rejoin without recalculating old inventory")
+	dataService.ReleasePlayer(milestonePlayer)
+end
 check(rewards.StartTracking == nil and rewards.ClaimNextReward == nil, "Timed rewards are fully removed")
 
 -- Failed departures retain progress, retry with backoff and join shutdown saves.

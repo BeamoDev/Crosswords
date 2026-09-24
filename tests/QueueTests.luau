@@ -39,6 +39,7 @@ check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.DOG.path), "Wrong pa
 check(not round:FindWord(1, "BIRD", {}), "Unknown word")
 local accepted, completed = round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.path)
 check(accepted and not completed, "Valid first word")
+check(round.members[1].score == 300 and round.members[2].score == 0, "Only the finder receives 100 score per canonical letter")
 check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.path), "Duplicate word cannot award XP")
 check(round.members[2].count == 0, "Solves are independent")
 check(round:NextHint(1) == "DOG", "Hint skips solved words")
@@ -46,6 +47,7 @@ check(round:MarkHint(1, "DOG"), "First hint accepted")
 check(not round:MarkHint(1, "DOG") and round.members[1].hintUses == 1, "Duplicate hint never spends twice")
 accepted, completed = round:FindWord(1, "DOG", puzzle.placedWordsByWord.DOG.path)
 check(accepted and completed, "Last word completes once")
+check(round.members[1].score == 450, "Hinted answer earns half score and previous duplicate adds nothing")
 check(not round:FindWord(1, "DOG", puzzle.placedWordsByWord.DOG.path), "Cannot award completion twice")
 check(round:NextHint(1) == nil, "Completed member cannot spend hint")
 local snapshot = round:Snapshot(false)
@@ -59,13 +61,13 @@ check(accepted, "Reverse gesture matches the canonical line")
 local second = Queue.NewRound("two", puzzle, { c })
 check(second.members[3].count == 0 and second.members[2] == nil, "Later round is isolated")
 local level, xp, needed = Config.Experience.Resolve(0)
-check(level == 1 and xp == 0 and needed == 500, "Fresh XP defaults")
-level, xp = Config.Experience.Resolve(499)
-check(level == 1 and xp == 499, "XP below level threshold")
-level, xp = Config.Experience.Resolve(500)
+check(level == 1 and xp == 0 and needed == 1000, "Fresh XP defaults")
+level, xp = Config.Experience.Resolve(999)
+check(level == 1 and xp == 999, "XP below level threshold")
+level, xp = Config.Experience.Resolve(1000)
 check(level == 2 and xp == 0, "XP crossing level threshold")
-level, xp, needed = Config.Experience.Resolve(1840)
-check(level == 4 and xp == 40 and needed == 800, "XP supports multiple levels with increasing requirements")
+level, xp, needed = Config.Experience.Resolve(3680)
+check(level == 4 and xp == 80 and needed == 1600, "XP supports multiple levels with increasing requirements")
 local Bots = require("../src/server/services/QueueBots")
 local highRandom = {
 	NextInteger = function(_, _, high) return high end,
@@ -286,5 +288,22 @@ do
 	check(not avatars.IsUsableAvatar(123, "   ", true), "Whitespace image is not usable")
 	check(not avatars.IsUsableAvatar(123, "rbxassetid://123", false), "Pending image is not usable")
 	check(avatars.IsUsableAvatar(123, "rbxthumb://type=AvatarHeadShot&id=123&w=150&h=150", true), "Other ready avatars remain usable")
+end
+
+do
+ local timed = Queue.NewRound("timed", puzzle, {a,b})
+ timed:SetTimer(100,180)
+ for _, word in ipairs(puzzle.words) do timed:FindWord(a.userId,word,puzzle.placedWordsByWord[word].path) end
+ check(#timed:Expire(279.99) == 0, "Round stays live before exact deadline")
+ local expired = timed:Expire(280)
+ check(#expired == 1 and expired[1] == b.userId and timed.members[a.userId].completed and not timed.members[a.userId].failed, "Shared expiry affects unfinished members only")
+ local revision = timed.revision
+ check(#timed:Expire(900) == 0 and timed.revision == revision, "Repeated expiry has no further state changes")
+end
+
+do
+ check(Config.Score.Level(0)==1 and Config.Score.Level(499)==1 and Config.Score.Level(500)==2, "Score levels start at one and advance every 500 points")
+ check(Config.Score.Level(2499)==5 and Config.Score.Level(2500)==6 and Config.Score.Level(5000)==11 and Config.Score.Level(7500)==16, "Five-level crown bands have exact score boundaries")
+ check(Config.Score.Completion(0,180)==1000 and Config.Score.Completion(90,180)==500 and Config.Score.Completion(180,180)==0, "Completion score scales only with remaining round fraction")
 end
 print("QUEUE_TESTS_PASSED=" .. n)

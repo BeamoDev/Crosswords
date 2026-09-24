@@ -1,5 +1,7 @@
 -- Pure state transitions. The server supplies time, roster and the canonical puzzle.
 local QueueState = {}
+local Engine = if script then require(game:GetService("ReplicatedStorage"):WaitForChild("shared"):WaitForChild("puzzle"):WaitForChild("PuzzleEngine")) else require("../../shared/puzzle/PuzzleEngine")
+local Score = (if script then require(game:GetService("ReplicatedStorage"):WaitForChild("shared"):WaitForChild("config"):WaitForChild("ProgressionConfig")) else require("../../shared/config/ProgressionConfig")).Score
 QueueState.__index = QueueState
 
 function QueueState.new(duration)
@@ -59,20 +61,42 @@ function QueueState.NewRound(id, puzzle, members, mode)
 		self.members[member.userId] = {
 			userId = member.userId, name = member.name, displayName = member.displayName,
 			isBot = member.isBot == true, thumbnailImage = member.thumbnailImage,
-			foundWords = {}, foundOrder = {}, hintedWords = {}, hintUses = 0, count = 0, xpEarned = 0, completed = false,
+			foundWords = {}, bonusWords = {}, foundOrder = {}, hintedWords = {}, hintUses = 0, count = 0, score = 0, xpEarned = 0, completed = false,
 		}
 		table.insert(self.order, member.userId)
 	end
 	return self
 end
 
+function Round:SetTimer(now, duration)
+	self.timeLimit, self.expiresAt = duration, now + duration
+end
+
+function Round:Expire(now)
+	local expired = {}
+	if not self.expiresAt or now < self.expiresAt then return expired end
+	for _, userId in ipairs(self.order) do
+		local member = self.members[userId]
+		if not member.completed and not member.failed then
+			member.failed, member.timedOut, member.duration = true, true, self.timeLimit
+			table.insert(expired, userId)
+		end
+	end
+	if #expired > 0 then self.revision += 1 end
+	return expired
+end
+
 function Round:FindWord(userId, word, path)
 	local member = self.members[userId]
 	local expected = type(word) == "string" and self.puzzle.placedWordsByWord[word] or nil
 	if not member or member.completed or member.failed or member.foundWords[word] or not expected
-		or not pathsMatch(expected.path, path) then return false, false end
+		then return false, false end
+	if self.puzzle.rules == "Strands" then
+		if not Engine.MatchesStrand(self.puzzle, word, path) then return false, false end
+	elseif not pathsMatch(expected.path, path) then return false, false end
 	member.foundWords[word] = true
 	member.foundOrder[word] = self.revision + 1
+	member.score += Score.Word(word, member.hintedWords[word] == true)
 	member.hintedWords[word] = nil
 	member.count += 1
 	member.completed = member.count == #self.puzzle.words
@@ -80,11 +104,31 @@ function Round:FindWord(userId, word, path)
 	return true, member.completed
 end
 
--- Only an actual straight, in-bounds incorrect selection can lose Hardcore.
+function Round:FindBonusWord(userId, path)
+	local member = self.members[userId]
+	if not member or member.isBot or member.completed or member.failed then return nil end
+	local word = Engine.ReadBonusWord(self.puzzle, path)
+	if self.members[userId] ~= member or member.completed or member.failed
+		or not word or member.foundWords[word] or member.bonusWords[word] then return nil end
+	member.bonusWords[word] = true
+	self.revision += 1
+	return word
+end
+
+-- Strands requires 3+ adjacent unique cells for a wrong-word loss.
+-- Legacy fixtures below retain their straight-line contract.
 function Round:FailSelection(userId, path)
 	local member = self.members[userId]
 	if self.mode ~= "Hardcore" or not member or member.completed or member.failed
 		or type(path) ~= "table" or #path < 2 or #path > 32 then return false end
+	if self.puzzle.rules == "Strands" then
+		local word = Engine.ReadAdjacentWord(self.puzzle.letters, path)
+		if not word or #word < 3 or Engine.ReadBonusWord(self.puzzle, path) or self.puzzle.placedWordsByWord[word]
+			or self.puzzle.placedWordsByWord[string.reverse(word)] then return false end
+		member.failed = true
+		self.revision += 1
+		return true
+	end
 	local dr, dc
 	for index, point in ipairs(path) do
 		if type(point) ~= "table" or type(point.row) ~= "number" or type(point.column) ~= "number"
@@ -139,11 +183,12 @@ function Round:Snapshot(includePuzzle)
 		table.insert(members, {
 			userId = userId, name = member.name, displayName = member.displayName,
 			isBot = member.isBot, thumbnailImage = member.thumbnailImage,
-			foundWords = table.clone(member.foundWords), foundOrder = table.clone(member.foundOrder), hintedWords = table.clone(member.hintedWords),
-			count = member.count, xpEarned = member.xpEarned, duration = member.duration, completed = member.completed, failed = member.failed == true,
+			bonusWords = table.clone(member.bonusWords), foundWords = table.clone(member.foundWords), foundOrder = table.clone(member.foundOrder), hintedWords = table.clone(member.hintedWords),
+			count = member.count, score = member.score, xpEarned = member.xpEarned, duration = member.duration, completed = member.completed, failed = member.failed == true, timedOut = member.timedOut == true,
 		})
 	end
 	return { id = self.id, mode = self.mode, solo = self.solo == true, members = members, revision = self.revision,
+		timeLimit = self.timeLimit, expiresAt = self.expiresAt,
 		puzzle = includePuzzle and self.puzzle or nil }
 end
 

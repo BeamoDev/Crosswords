@@ -306,28 +306,42 @@ function InterfaceController.Bind(hud)
 	}
 	ui.modes = required(ui.home, { "Gamemodes" })
 	ui.standard = required(ui.modes, { "Standard" })
+	ui.homeTilePreviews = {}
+	for _, preview in ipairs({
+		{ "Standard", 5, Color3.fromRGB(88, 224, 255), 0 },
+		{ "Mini", 3, Color3.fromRGB(119, 222, 176), 0.25 },
+	}) do
+		local frame = path(ui.modes:FindFirstChild(preview[1]), { "CanvasGroup", "Frame1" })
+		local animation = Effects.CreateHomeTilePreview(frame, preview[2], preview[3], preview[4])
+		if animation then table.insert(ui.homeTilePreviews, animation) end
+	end
+	local jumboPreview = Effects.CreateJumboPreview(path(ui.modes:FindFirstChild("Jumbo"), { "CanvasGroup", "Frame1" }))
+	if jumboPreview then table.insert(ui.homeTilePreviews, jumboPreview) end
 	ui.play = required(ui.standard, { "Play" })
 	ui.waiting = required(ui.standard, { "Waiting" })
 	ui.buttonBar = required(ui.home, { "ButtonBar" })
-	ui.boardPanel = required(ui.game, { "BoardPanel" })
+	ui.boardPanel = ui.game:FindFirstChild("BOARDINFO") or ui.game:FindFirstChild("BoardInfo")
+		or required(ui.game, { "BoardPanel" })
 	ui.wordPanel = required(ui.game, { "WordPanel" })
 	ui.words = required(ui.wordPanel, { "Words" })
 	ui.wordList = required(ui.wordPanel, { "Container", "ScrollingFrame" })
-	ui.title = required(ui.game, { "Title" })
-	ui.subtitle = required(ui.game, { "Subtitle" })
+	local scorePanel = ui.game:FindFirstChild("Score")
+	ui.scoreText = path(scorePanel, { "Score" })
+	ui.scoreLevel = path(scorePanel, { "Level", "Label" }) or path(scorePanel, { "Level", "label" })
+	ui.title = ui.game:FindFirstChild("Title")
+	ui.subtitle = ui.game:FindFirstChild("Subtitle")
 	ui.hint = required(ui.game, { "Hint" })
 	ui.hintBadge = path(ui.hint, { "Owned" })
 	ui.hintCount = path(ui.hintBadge, { "TextLabel" })
 	if ui.hintBadge then ui.hintBadge.Visible = false end
-	ui.exit = required(ui.game, { "Exit" })
+	ui.exit = ui.game:FindFirstChild("Exit")
 	ui.duel = ui.game:FindFirstChild("OneVsOneMode")
 	ui.timed = ui.game:FindFirstChild("TimedMode")
 	ui.timedTimeLeft = path(ui.timed, { "TimeLeft" })
-	ui.timedFill = path(ui.timed, { "FillBar", "Fill" })
-	InterfaceController.UpdateTimedTimer(ui, nil, nil, true)
+	InterfaceController.UpdateTimedTimer(ui, nil, nil)
 	ui.home.Visible, ui.game.Visible = true, false
 	if ui.duel then ui.duel.Visible = false end
-	if ui.timed then ui.timed.Visible = false end
+	if ui.timed then ui.timed.Visible = true end
 	ui.wordList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	ui.wordList.CanvasSize = UDim2.new()
 	ui.wordList.ScrollingDirection = Enum.ScrollingDirection.Y
@@ -337,14 +351,14 @@ function InterfaceController.Bind(hud)
 	local icon = ui.home:FindFirstChild("GameIcon")
 	if icon then
 		local base = icon.Rotation
-		icon.Rotation = base - 4
-		TweenService:Create(icon, TweenInfo.new(3.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-			{ Rotation = base + 4 }):Play()
+		icon.Rotation = base - 2
+		TweenService:Create(icon, TweenInfo.new(6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Rotation = base + 2 }):Play()
 	end
 	local waitingStroke = path(ui.waiting, { "Frame", "UIStroke" })
 	if waitingStroke then
-		waitingStroke.Thickness = 3
-		TweenService:Create(waitingStroke, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		waitingStroke.Thickness = 2
+		TweenService:Create(waitingStroke, TweenInfo.new(2.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
 			{ Thickness = 1 }):Play()
 	end
 	if ui.duel then
@@ -362,8 +376,8 @@ function InterfaceController.Bind(hud)
 	ui.queueEntries = {}
 	ui.queuePortraitRandom = Random.new()
 	ui.queue.Visible = false
-	for _, screen in ipairs({ ui.home, ui.game, ui.queue }) do Effects.AnimatePattern(screen:FindFirstChild("Pattern")) end
-	ui.queueSubtitle.Text = "Classic Mode (15s)"
+	for _, screen in ipairs({ ui.home, ui.game, ui.queue }) do Effects.AnimatePattern(screen:FindFirstChild("Pattern"), screen == ui.home) end
+	ui.queueSubtitle.Text = "Standard Mode (15s)"
 	local queueLayout = ui.queueContainer:FindFirstChildOfClass("UIGridLayout")
 	if queueLayout then queueLayout.SortOrder = Enum.SortOrder.LayoutOrder end
 	local pause = Instance.new("Frame")
@@ -382,8 +396,12 @@ function InterfaceController.Bind(hud)
 	for _, root in ipairs({ ui.home, ui.queue, pause }) do Effects.ApplyToAll(root) end
 	if ui.frames then Effects.ApplyToAll(ui.frames) end
 	Effects.Init(ui.hint)
-	Effects.Init(ui.exit)
+	if ui.exit then Effects.Init(ui.exit) end
 	return ui
+end
+
+function InterfaceController.StepHomePreviews(ui, dt, available)
+	for _, animation in ipairs(ui.homeTilePreviews or {}) do animation:Step(dt, available) end
 end
 
 function InterfaceController.UpdateQueue(ui, members)
@@ -435,46 +453,19 @@ function InterfaceController.UpdateQueue(ui, members)
 end
 
 function InterfaceController.UpdateQueueTimer(ui, seconds)
-	ui.queueSubtitle.Text = string.format("Classic Mode (%ds)", math.max(0, math.ceil(seconds)))
+	ui.queueSubtitle.Text = string.format("Standard Mode (%ds)", math.max(0, math.ceil(seconds)))
 end
 
--- Presentation only: a future Timed controller supplies seconds remaining and total.
+-- Every gameplay mode displays its server-owned round deadline here.
 -- Passing nil clears stale time without starting a local countdown.
-function InterfaceController.UpdateTimedTimer(ui, remaining, duration, immediate)
+function InterfaceController.UpdateTimedTimer(ui, remaining, duration)
 	local valid = type(remaining) == "number" and remaining == remaining and math.abs(remaining) < math.huge
 		and type(duration) == "number" and duration > 0 and duration < math.huge
 	local seconds = valid and math.clamp(remaining, 0, duration) or 0
-	local fraction = valid and seconds / duration or 1
-	local label, fill = ui.timedTimeLeft, ui.timedFill
+	local label = ui.timedTimeLeft
 	if label and (label:IsA("TextLabel") or label:IsA("TextButton")) then
 		local rounded = math.ceil(seconds)
 		label.Text = valid and string.format("%02d:%02d", math.floor(rounded / 60), rounded % 60) or "--:--"
-	end
-	if not fill or not fill:IsA("GuiObject") then return end
-	local state = ui.timedBarState
-	if state and state.fill ~= fill then
-		if state.tween then state.tween:Cancel() end
-		state = nil
-	end
-	if not state then
-		state = { fill = fill, height = fill.Size.Y }
-		ui.timedBarState = state
-		immediate = true
-	end
-	if state.fraction == fraction and not immediate then return end
-	state.fraction = fraction
-	if state.tween then state.tween:Cancel() state.tween = nil end
-	local green, yellow, red = Color3.fromRGB(75, 202, 53), Color3.fromRGB(255, 196, 54), Color3.fromRGB(202, 61, 51)
-	local color = fraction >= 0.5 and green:Lerp(yellow, (1 - fraction) * 2)
-		or yellow:Lerp(red, 1 - fraction * 2)
-	local size = UDim2.new(fraction, 0, state.height.Scale, state.height.Offset)
-	if immediate or not valid then
-		fill.Size, fill.BackgroundColor3 = size, color
-	else
-		state.tween = TweenService:Create(fill, TweenInfo.new(0.18, Enum.EasingStyle.Linear), {
-			Size = size, BackgroundColor3 = color,
-		})
-		state.tween:Play()
 	end
 end
 
@@ -750,7 +741,8 @@ function InterfaceController.UpdateLevelBars(ui, progression)
 	local currentLevel = progression.level or 1
 	local xp, requiredXp = progression.xp or 0, progression.xpToNextLevel or Experience.RequiredForLevel(currentLevel)
 	ui.levelBarFeedback = ui.levelBarFeedback or setmetatable({}, { __mode = "k" })
-	local rewardHints = progression.nextLevelRewardHints or Experience.HintsForLevel(currentLevel + 1)
+	local rewardLevel = currentLevel + (currentLevel % 2 == 0 and 2 or 1)
+	local rewardHints = Experience.HintsForLevel(rewardLevel)
 	for _, root in ipairs({ ui.home:FindFirstChild("LevelBar"), ui.game:FindFirstChild("LevelBar") }) do
 		if root then
 			local label = root:FindFirstChild("XP")
@@ -764,16 +756,16 @@ function InterfaceController.UpdateLevelBars(ui, progression)
 			if level then level.Text = tostring(currentLevel) end
 			local nextTitle = root:FindFirstChild("NextLevelTitle")
 			if nextTitle then
-				nextTitle.Visible = true
-				nextTitle.Text = string.format("LEVEL %d REWARD", currentLevel + 1)
+				nextTitle.Visible = root ~= ui.game:FindFirstChild("LevelBar")
+				nextTitle.Text = string.format("LEVEL %d REWARD", rewardLevel)
 			end
 			local rewardTitle = root:FindFirstChild("NextLevelRewardTitle")
 			if rewardTitle then
-				rewardTitle.Visible = true
+				rewardTitle.Visible = root ~= ui.game:FindFirstChild("LevelBar")
 				rewardTitle.Text = string.format("+%d Hint%s", rewardHints, rewardHints == 1 and "" or "s")
 			end
 			local rewardIcon = root:FindFirstChild("NextLevelRewardIcon")
-			if rewardIcon then rewardIcon.Visible = true end
+			if rewardIcon then rewardIcon.Visible = root ~= ui.game:FindFirstChild("LevelBar") end
 			local fill = path(root, { "FillBar", "Fill" })
 			if fill then
 				if fill.Size.X.Scale < 0.1 then
