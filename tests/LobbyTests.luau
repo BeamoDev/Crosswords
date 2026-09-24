@@ -136,6 +136,7 @@ local controller = luau.load(fs.readFile("src/client/controllers/GameController.
 }})()
 controller.Start()
 check(not hud.Enabled, "Main waits for intro")
+check(ui.play.BackgroundTransparency == 0.2, "Standard Play uses its stronger translucent background")
 check(not outcomeContext.canShowVerifyPrompt() and not outcomeContext.hasCompletedFirstPuzzle(), "Verify waits for startup and a normal puzzle completion")
 introDone()
 check(hud.Enabled, "Main enables after intro")

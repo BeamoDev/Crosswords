@@ -40,6 +40,9 @@ function GameController.Start()
 	local Tutorial = require(client:WaitForChild("features"):WaitForChild("Tutorial"))
 	Audio.SetEnabled(false)
 	local ui = Interface.Bind(hud)
+	if ui.play:IsA("GuiObject") then
+		ui.play.BackgroundTransparency = 0.2
+	end
 	local folder = ReplicatedStorage:WaitForChild(Contract.FolderName)
 	local action = folder:WaitForChild(Contract.QueueAction)
 	local queueUpdated = folder:WaitForChild(Contract.QueueUpdated)
