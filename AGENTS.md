@@ -37,7 +37,7 @@ Applies to this repository. Reconciled against source on **2026-09-25**.
 - Portrait palettes/headshots remain stable per round/card. Keep the shuffled 30-colour palette (saturation 0.75-0.85, value 0.85-0.95), darker matching stroke, verified bot image and stale-thumbnail guards. Hide optional authored Profile placeholders.
 - Main.Game Title/Subtitle/Exit are optional. Do not create replacements. Keep authored Background and Streak. Timer is always visible; Game.TimedMode moves to (0.5,0.03) for Duel and restores its exact authored position otherwise.
 - Game.Score.Score shows Score: X. Score.Level.Label (lowercase alias allowed) shows crown + Level N. Reset each board, including practice/rematches. Level = 1 + floor(score/500); bronze 1-5, silver 6-10, gold 11-15, diamond 16+. Only changed authoritative levels pulse. No replacement Score frame.
-- Preserve Home, Queue, GroupIntro, Frames modals, white transitions, XP bars, existing pause/Leave and result Play/Home/Rematch. Input locks last through reveals; late callbacks cannot reopen an old round. The removed Home Shop and Frames.Shop remain optional; empty Hint prompts existing product 3714515983.
+- Preserve Home, Queue, GroupIntro, Frames modals, white transitions, XP bars, existing pause/Leave and result Play/Home/Rematch. Input locks last through reveals; late callbacks cannot reopen an old round. The removed Home Shop and Frames.Shop remain optional; empty Hint prompts existing product 3714523709.
 - Home Standard/Mini previews sweep straight Across/Down entries (5 / 3 cells), preserving colour/timing/cancellation. Jumbo's decorative 3x3/6x6 morph remains independent of gameplay size. Keep Pattern/GameIcon/waiting animation contracts and authored scales.
 
 ## Queue, Duel and timers

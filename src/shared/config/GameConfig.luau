@@ -15,7 +15,7 @@ Meta.DEFAULTS = {
 	},
 }
 
-Meta.DIRECT_HINT_PRODUCT = { Id = 3714515983, Amount = 1 }
+Meta.DIRECT_HINT_PRODUCT = { Id = 3714523709, Amount = 1 }
 
 -- Keep earlier product grants available for delayed receipts.
 Meta.HINT_PRODUCT_IDS = {

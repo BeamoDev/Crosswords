@@ -234,7 +234,7 @@ for _, pack in ipairs({ {15, 3573028459}, {30, 3711566945} }) do
 end
 do
  local product=GameConfig.Meta.DIRECT_HINT_PRODUCT
- check(product.Id==3714515983 and product.Amount==1,"Direct Hint product is configured to grant one hint")
+ check(product.Id==3714523709 and product.Amount==1,"Direct Hint product is configured to grant one hint")
  local before=dataService.GetMutableData(actor).hints
  local receipt="direct-hint-receipt"
  local result=rewards.GrantProductPurchase(actor,product.Id,receipt)

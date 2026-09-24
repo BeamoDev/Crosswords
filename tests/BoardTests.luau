@@ -1669,15 +1669,15 @@ end)()
  controller:connectRemoteEvents()
  local before=#prompts
  controller:promptHintPurchase()
- check(controller.hintPurchasePending and #prompts==before+1 and prompts[#prompts]==3714515983 and not controller.elements.shopFrame,"Hint prompts the new product without an authored Shop")
+ check(controller.hintPurchasePending and #prompts==before+1 and prompts[#prompts]==3714523709 and not controller.elements.shopFrame,"Hint prompts the configured product without an authored Shop")
  controller:promptHintPurchase()
  check(#prompts==before+1,"Repeated taps cannot duplicate a pending hint prompt")
- for _,fn in ipairs(finished.callbacks) do fn(999,3714515983,false) fn(players.LocalPlayer.UserId,3573028208,false) end
+ for _,fn in ipairs(finished.callbacks) do fn(999,3714523709,false) fn(players.LocalPlayer.UserId,3573028208,false) end
  check(controller.hintPurchasePending,"Other players and products cannot clear the active hint prompt")
- for _,fn in ipairs(finished.callbacks) do fn(players.LocalPlayer.UserId,3714515983,false) end
+ for _,fn in ipairs(finished.callbacks) do fn(players.LocalPlayer.UserId,3714523709,false) end
  check(not controller.hintPurchasePending,"Cancelling the matching prompt releases input")
  controller:promptHintPurchase()
- for _,fn in ipairs(finished.callbacks) do fn(players.LocalPlayer.UserId,3714515983,true) end
+ for _,fn in ipairs(finished.callbacks) do fn(players.LocalPlayer.UserId,3714523709,true) end
  check(#prompts==before+2 and not controller.hintPurchasePending,"Successful prompt closes without granting hints on the client")
  local prompt=services.MarketplaceService.PromptProductPurchase
  services.MarketplaceService.PromptProductPurchase=function() error("Prompt unavailable") end

@@ -27,7 +27,7 @@ local DEFAULT_META_CONFIG = {
 			DuelInvites = true,
 		},
 	},
-	DIRECT_HINT_PRODUCT = { Id = 3714515983, Amount = 1 },
+	DIRECT_HINT_PRODUCT = { Id = 3714523709, Amount = 1 },
 	HINT_PRODUCT_IDS = {
 		[1] = 3573028208,
 		[5] = 3573028342,

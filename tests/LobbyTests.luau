@@ -89,7 +89,7 @@ local purchasePrompts = {}
 local meta = {bind=function() end,applySnapshot=function() end,
 	queueVerifyPrompt=function() end,
 	elements={},
-	promptHintPurchase=function(self) if not self.hintPurchasePending then self.hintPurchasePending=true table.insert(purchasePrompts,3714515983) end end,
+	promptHintPurchase=function(self) if not self.hintPurchasePending then self.hintPurchasePending=true table.insert(purchasePrompts,3714523709) end end,
 	showFrame=function(_, frame) frame.Visible=true end,
 	setModalFrameVisible=function(_, frame, visible) frame.Visible=visible end,
 	showGameOutcome=function(_, result, profile) table.insert(shownOutcomes, {result=result, profile=profile}) end}
@@ -185,7 +185,7 @@ for _, mode in ipairs({"Mini","Jumbo","Hardcore"}) do
 	local promptCount, beforeEmptyHint = #purchasePrompts, #requests
 	snapshot.hints = 0
 	ui.hint.Activated:Fire()
-	check(not ui.frames.Shop and #purchasePrompts == promptCount+1 and purchasePrompts[#purchasePrompts]==3714515983 and #requests == beforeEmptyHint, "Empty Hint directly prompts the new product without a Shop frame or hint request")
+	check(not ui.frames.Shop and #purchasePrompts == promptCount+1 and purchasePrompts[#purchasePrompts]==3714523709 and #requests == beforeEmptyHint, "Empty Hint directly prompts the configured one-hint product without a Shop frame or hint request")
 	check(ui.game.Visible and not board.callbacks.canInteract(), "Native hint prompt keeps the puzzle visible and blocks board input")
 	ui.hint.Activated:Fire()
 	check(#purchasePrompts == promptCount+1 and #requests == beforeEmptyHint, "Repeated hint taps cannot open overlapping purchase prompts")
