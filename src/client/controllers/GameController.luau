@@ -80,6 +80,9 @@ function GameController.Start()
 	local function updateModePlay(control, level, requiredLevel)
 		if not control then return end
 		local locked = level < requiredLevel
+		if not locked and control:IsA("GuiObject") then
+			control.BackgroundTransparency = 0.7
+		end
 		local icon = control:FindFirstChild("Locked")
 		if icon and icon:IsA("GuiObject") then icon.Visible = locked end
 		local value = locked and ("Level " .. requiredLevel) or "PLAY"

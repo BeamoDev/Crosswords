@@ -39,6 +39,7 @@ Applies to this repository. Reconciled against source on **2026-09-25**.
 - Game.Score.Score shows Score: X. Score.Level.Label (lowercase alias allowed) shows crown + Level N. Reset each board, including practice/rematches. Level = 1 + floor(score/500); bronze 1-5, silver 6-10, gold 11-15, diamond 16+. Only changed authoritative levels pulse. No replacement Score frame.
 - Preserve Home, Queue, GroupIntro, Frames modals, white transitions, XP bars, existing pause/Leave and result Play/Home/Rematch. Input locks last through reveals; late callbacks cannot reopen an old round. The removed Home Shop and Frames.Shop remain optional; empty Hint prompts existing product 3714523709.
 - Home Standard/Mini previews sweep straight Across/Down entries (5 / 3 cells), preserving colour/timing/cancellation. Jumbo's decorative 3x3/6x6 morph remains independent of gameplay size. Keep Pattern/GameIcon/waiting animation contracts and authored scales.
+- When Mini, Jumbo or Hardcore is unlocked, its `.Play` GuiObject uses `BackgroundTransparency = 0.7`; the locked state keeps its authored background appearance.
 
 ## Queue, Duel and timers
 

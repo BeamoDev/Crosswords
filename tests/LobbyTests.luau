@@ -33,6 +33,7 @@ ui.frames = node() -- Current authored HUD has no Shop frame.
 ui.buttonBar.Duel = button()
 for mode in pairs(Config.Experience.ModeLevels) do
 	ui.modes[mode] = node({Play=button()})
+	ui.modes[mode].Play.BackgroundTransparency = 0.23
 	ui.modes[mode].Play.Locked = node({Visible=true}, "ImageLabel")
 end
 local hud = node({Parent=true}, "ScreenGui")
@@ -150,6 +151,7 @@ do
 	tutorial.finished = false
 end
 local before = #requests
+check(ui.modes.Mini.Play.BackgroundTransparency == 0.23, "Locked mode keeps its authored button background")
 ui.modes.Mini.Play.Activated:Fire()
 check(#requests == before, "Locked Mini does not send a solo request")
 snapshot.progression.level=20
@@ -163,7 +165,10 @@ local function finishExit()
 	homeTransition.complete(true)
 end
 for _, mode in ipairs({"Mini","Jumbo","Hardcore"}) do
-	check(ui.modes[mode].Play.TextLabel.TextColor3 == rbx.Color3.new(1,1,1) and ui.modes[mode].Play.TextLabel.Text == "PLAY", "Unlocked button shows Play")
+	check(ui.modes[mode].Play.TextLabel.TextColor3 == rbx.Color3.new(1,1,1)
+		and ui.modes[mode].Play.TextLabel.Text == "PLAY"
+		and ui.modes[mode].Play.BackgroundTransparency == 0.7,
+		"Unlocked button shows Play with its translucent background")
 	local entries=transitionCount
 	ui.modes[mode].Play.Activated:Fire()
 	check(requests[#requests].action == "StartSolo" and requests[#requests].mode == mode, "Lobby sends direct solo request")
