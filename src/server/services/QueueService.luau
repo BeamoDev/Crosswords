@@ -3,7 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local shared = ReplicatedStorage:WaitForChild("shared")
-local Generator = require(shared:WaitForChild("puzzle"):WaitForChild("PuzzleGenerator"))
+local Generator = require(script.Parent.Parent.puzzle.PuzzleGenerator)
 local Config = require(shared:WaitForChild("config"):WaitForChild("ProgressionConfig"))
 local GameConfig = require(shared:WaitForChild("config"):WaitForChild("GameConfig"))
 local Economy = GameConfig.Economy
@@ -116,10 +116,9 @@ local function sendQueue()
 end
 
 local function sendRound(round, includePuzzle)
-	local payload = round:Snapshot(includePuzzle)
 	for _, userId in ipairs(round.order) do
 		local player = not round.members[userId].isBot and Players:GetPlayerByUserId(userId)
-		if player then remotes.round:FireClient(player, payload) end
+		if player then remotes.round:FireClient(player, round:Snapshot(includePuzzle, player.UserId)) end
 	end
 end
 
@@ -273,10 +272,10 @@ local function handle(player, payload)
 	drainDue()
 	local round = playerRounds[player.UserId]
 	if action == "Sync" then
-		return { success = true, queue = queueSnapshot(player), round = round and round:Snapshot(true) }
+		return { success = true, queue = queueSnapshot(player), round = round and round:Snapshot(true, player.UserId) }
 	elseif action == "Join" then
 		if player:GetAttribute("TutorialBusy") then return { success = false, message = "Finish or skip the tutorial first." } end
-		if round then return { success = true, round = round:Snapshot(true), queue = queueSnapshot(player) } end
+		if round then return { success = true, round = round:Snapshot(true, player.UserId), queue = queueSnapshot(player) } end
 		if player:GetAttribute("DuelBusy") then return { success = false, message = "Leave your duel first." } end
 		local data = DataService.GetMutableData(player)
 		local level = data.progression.level
@@ -294,7 +293,7 @@ local function handle(player, payload)
 		if not required then return { success = false, message = "That solo mode is unavailable." } end
 		if player:GetAttribute("TutorialBusy") then return { success = false, message = "Finish or skip the tutorial first." } end
 		if player:GetAttribute("DuelBusy") then return { success = false, message = "Leave your duel first." } end
-		if round then return { success = true, round = round:Snapshot(true) } end
+		if round then return { success = true, round = round:Snapshot(true, player.UserId) } end
 		if payload.mode ~= "Standard" and (queue.members[player.UserId] or privateQueues[player.UserId]) then return { success = false, message = "Leave the queue first." } end
 		local data = DataService.GetMutableData(player)
 		local level = data.progression.level
@@ -323,14 +322,14 @@ local function handle(player, payload)
 		if leftQueue then sendQueue() end
 		rounds[round.id], playerRounds[player.UserId] = round, round
 		player:SetAttribute("RoundBusy", true)
-		return { success = true, round = round:Snapshot(true) }
+		return { success = true, round = round:Snapshot(true, player.UserId) }
 	elseif action == "LeaveQueue" then
 		if not round then
 			local changed = queue:Remove(player.UserId) or privateQueues[player.UserId] ~= nil
 			discardPrivate(player.UserId)
 			if changed then player:SetAttribute("RoundBusy", false) sendQueue() end
 		end
-		return { success = true, queue = queueSnapshot(player), round = round and round:Snapshot(true) }
+		return { success = true, queue = queueSnapshot(player), round = round and round:Snapshot(true, player.UserId) }
 	elseif action == "Exit" then
 		-- A delayed exit from an old round must not remove a new membership.
 		if round and payload.roundId == round.id then QueueService.Remove(player) end
@@ -340,23 +339,18 @@ local function handle(player, payload)
 	local data = DataService.GetMutableData(player)
 	local member = round.members[player.UserId]
 	if action == "Word" then
-		local accepted, completed = round:FindWord(player.UserId, payload.word, payload.path)
+		local accepted, completed = round:FindWord(player.UserId, payload.word, payload.answer)
 		if not accepted then
-			local bonus = round:FindBonusWord(player.UserId, payload.path)
-			if bonus then
-				sendRound(round, false)
-				return {success = true, bonusWord = bonus, round = round:Snapshot(false)}
-			end
-			if round:FailSelection(player.UserId, payload.path) then
+			if round:FailSelection(player.UserId, payload.word, payload.answer) then
 				member.duration = math.max(0, os.clock() - round.startedAt)
 				DataService.RecordModeOutcome(data, round.mode, false)
 				sendRound(round, false)
-				return { success = false, round = round:Snapshot(false), snapshot = publishProfile(player) }
+				return { success = false, round = round:Snapshot(false, player.UserId), snapshot = publishProfile(player) }
 			end
-			return { success = false, round = round:Snapshot(false) }
+			return { success = false, round = round:Snapshot(false, player.UserId) }
 		end
 		DataService.RecordWordFound(data)
-		local wordXp = #payload.word * Config.Experience.PerLetter
+		local wordXp = round.puzzle.placedWordsByWord[payload.word].length * Config.Experience.PerLetter
 		DataService.AddExperience(player, wordXp)
 		member.xpEarned += wordXp
 		if completed then
@@ -374,7 +368,7 @@ local function handle(player, payload)
 			round.botOwner:Release(round:Snapshot(false).members, Workspace:GetServerTimeNow(), round)
 		end
 		sendRound(round, false)
-		return { success = true, round = round:Snapshot(false), snapshot = publishProfile(player) }
+		return { success = true, round = round:Snapshot(false, player.UserId), snapshot = publishProfile(player) }
 	elseif action == "Hint" then
 		local word = round:NextHint(player.UserId)
 		if not word then return { success = false, message = "All remaining words already have hints." } end
@@ -382,7 +376,7 @@ local function handle(player, payload)
 		round:MarkHint(player.UserId, word)
 		data.hints -= 1
 		sendRound(round, false)
-		return { success = true, word = word, round = round:Snapshot(false), snapshot = publishProfile(player) }
+		return { success = true, word = word, round = round:Snapshot(false, player.UserId), snapshot = publishProfile(player) }
 	end
 	return { success = false }
 end

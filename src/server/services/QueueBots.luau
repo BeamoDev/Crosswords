@@ -167,7 +167,7 @@ function QueueBots:Step(realCount, queue, now, freezeLobby)
 				if bot.challenger then cap = human.best > 0 and human.best + 1 or 1 end
 				cap = math.min(cap, human.completed and total or total - 1)
 				if bot.challenger and human.best >= total - 1 and human.best > 0 then cap = total end
-				local delay = math.max(14, human.pace * bot.pace * bot.variation + #word * 0.35)
+				local delay = math.max(14, human.pace * bot.pace * bot.variation + (round.puzzle.placedWordsByWord[word].length or #word) * 0.35)
 				if not human.active or member.count >= cap then
 					bot.nextAt = now + self.random:NextNumber(8, 18)
 				elseif now < round.botPacing.nextFindAt or now < bot.lastSolveAt + delay then
@@ -175,7 +175,7 @@ function QueueBots:Step(realCount, queue, now, freezeLobby)
 				else
 					table.remove(bot.words)
 					local placed = round.puzzle.placedWordsByWord[word]
-					if round:FindWord(id, word, placed.path) then changedRounds[round] = true end
+					if round:FindWord(id, word, placed.answer) then changedRounds[round] = true end
 					bot.lastSolveAt = now
 					bot.variation = self.random:NextNumber(0.85, 1.25)
 					local pauseChance = bot.challenger and 0.08 or 0.18

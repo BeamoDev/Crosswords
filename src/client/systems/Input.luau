@@ -1,63 +1,34 @@
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Input = {}
-
 function Input.bind(board, onPause)
-	local connections = {}
-	local function connect(signal, callback) table.insert(connections, signal:Connect(callback)) end
-	connect(UserInputService.InputBegan, function(input, processed)
-		local kind = input.UserInputType
-		if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch then
-			if not board.activeInput then board:Begin(input.Position, input) end
-			return
-		end
-		if input.KeyCode == Enum.KeyCode.ButtonB then
-			if board.startCell then board:Cancel() else onPause() end
-			return
-		end
-		if processed or UserInputService:GetFocusedTextBox() or not board:Interactive() then return end
-		local selected = GuiService.SelectedObject
-		if selected and not selected:IsDescendantOf(board.grid) then return end
-		local dpad = input.KeyCode == Enum.KeyCode.DPadLeft or input.KeyCode == Enum.KeyCode.DPadRight
-			or input.KeyCode == Enum.KeyCode.DPadUp or input.KeyCode == Enum.KeyCode.DPadDown
-		-- Native selection owns navigation once the user has selected a button.
-		if dpad and selected then return end
-		local directions = {
-			[Enum.KeyCode.DPadLeft] = {0, -1}, [Enum.KeyCode.DPadRight] = {0, 1},
-			[Enum.KeyCode.DPadUp] = {-1, 0}, [Enum.KeyCode.DPadDown] = {1, 0},
-			[Enum.KeyCode.Left] = { 0, -1 }, [Enum.KeyCode.Right] = { 0, 1 },
-			[Enum.KeyCode.Up] = { -1, 0 }, [Enum.KeyCode.Down] = { 1, 0 },
-			[Enum.KeyCode.A] = { 0, -1 }, [Enum.KeyCode.D] = { 0, 1 },
-			[Enum.KeyCode.W] = { -1, 0 }, [Enum.KeyCode.S] = { 1, 0 },
-		}
-		local direction = directions[input.KeyCode]
-		if direction then board:KeyboardMove(direction[1], direction[2])
-		elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.Space
-			or (input.KeyCode == Enum.KeyCode.ButtonA and not selected) then
-			board:ActivateCell(board.cursor or { row = 1, column = 1 })
-		end
-	end)
-	connect(UserInputService.InputChanged, function(input)
-		if not board.activeInput then return end
-		if board.inputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseMovement then
-			board:Move(input.Position)
-		elseif input == board.activeInput then
-			board:Move(input.Position)
-		end
-	end)
-	connect(UserInputService.InputEnded, function(input)
-		if not board.activeInput then return end
-		if input == board.activeInput or (board.inputType == Enum.UserInputType.MouseButton1
-			and input.UserInputType == Enum.UserInputType.MouseButton1) then
-			board:Move(input.Position)
-			board:Finish()
-		end
-	end)
-	connect(UserInputService.WindowFocusReleased, function() board:Cancel() end)
-	return function()
-		board:Cancel()
-		for _, connection in ipairs(connections) do connection:Disconnect() end
-	end
+    local connections = {}
+    table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
+        if processed or UserInputService:GetFocusedTextBox() then return end
+        if input.KeyCode == Enum.KeyCode.ButtonB then onPause() return end
+        if not board:Interactive() then return end
+        local selected = GuiService.SelectedObject
+        if selected and not selected:IsDescendantOf(board.ui.boardPanel) and not selected:IsDescendantOf(board.ui.wordPanel) then return end
+        local code = input.KeyCode
+        local dpad = code == Enum.KeyCode.DPadLeft or code == Enum.KeyCode.DPadRight or code == Enum.KeyCode.DPadUp or code == Enum.KeyCode.DPadDown
+        if dpad and selected then return end
+        local directions = {
+            [Enum.KeyCode.Left]={0,-1}, [Enum.KeyCode.Right]={0,1}, [Enum.KeyCode.Up]={-1,0}, [Enum.KeyCode.Down]={1,0},
+            [Enum.KeyCode.DPadLeft]={0,-1}, [Enum.KeyCode.DPadRight]={0,1}, [Enum.KeyCode.DPadUp]={-1,0}, [Enum.KeyCode.DPadDown]={1,0},
+        }
+        if directions[code] then board:KeyboardMove(table.unpack(directions[code]))
+        elseif code == Enum.KeyCode.Backspace or code == Enum.KeyCode.Delete then board:Key("BACK")
+        elseif code == Enum.KeyCode.Return or code == Enum.KeyCode.KeypadEnter then board:Key("CHECK")
+        elseif code == Enum.KeyCode.Tab or code == Enum.KeyCode.ButtonR1 then board:Key("NEXT")
+        elseif code == Enum.KeyCode.ButtonL1 then board:Key("PREV")
+        elseif code == Enum.KeyCode.Space or code == Enum.KeyCode.ButtonX then board:Key("TURN")
+        elseif code == Enum.KeyCode.ButtonA and not selected then board:Key("CHECK")
+        elseif input.UserInputType == Enum.UserInputType.Keyboard and code.Name:match("^[A-Z]$") then board:Key(code.Name) end
+    end))
+    table.insert(connections, UserInputService.WindowFocusReleased:Connect(function() board:Cancel() end))
+    return function()
+        board:Cancel()
+        for _, connection in ipairs(connections) do connection:Disconnect() end
+    end
 end
-
 return Input

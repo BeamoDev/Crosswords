@@ -1,6 +1,17 @@
-# English dictionary
+# Crossword content provenance
 
-ENABLE2K by Alan Beale and M. Cooper is public domain. The game vendors its ASCII words of 3?32 letters in alphabetical Luau shards for offline validation. No network dictionary calls happen during play.
+The current answer/clue bank contains 986 unique entries extracted from the user-supplied original crossword project, `OLDSRC/server/Puzzles.luau` (320 puzzle records). The layout algorithm was adapted from `OLDSRC/server/CrosswordGenerator.luau`. No external dictionary download was added for this conversion. Original source is retained in the ignored local backup.
+
+Original file SHA-256 hashes before extraction:
+
+- Puzzles.luau: `f5dd99e1c87e67b307fe36801153a821e0f945f504904d79dc6bc30b6869cb82`
+- CrosswordGenerator.luau: `76640db20ed548520b110b06927f2d7d425cbaaebc498fcdb0506c882d9945e5`
+
+# Historical English dictionary notice
+
+The ENABLE2K dictionary and its twelve shards were removed from current runtime source when bonus dictionary-word gameplay was retired. This notice is retained for the earlier files in repository history.
+
+ENABLE2K by Alan Beale and M. Cooper is public domain. The prior game vendored its ASCII words of 3-32 letters in alphabetical Luau shards for offline validation. No network dictionary calls were used during play.
 
 Source: https://raw.githubusercontent.com/BartMassey/wordlists/main/enable2k.txt.gz
 
@@ -11,9 +22,9 @@ Words included: 173432
 Original distribution notice:
 
 ```text
-                              ������������
+                              â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
                                  ENABLE
-                              ������������
+                              â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 
 The Enhanced North American Benchmark LExicon (ENABLE) is the most
@@ -112,7 +123,7 @@ from the command line or a script.
 
 
 
-�����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 The ENABLE master word list, WORD.LST, is herewith formally released
 into the Public Domain. Anyone is free to use it or distribute it in
@@ -147,7 +158,7 @@ of his excellent TEA word list generation / analysis program. See his
 home page, http://www.bryson.demon.co.uk/, for word list info and more
 details of TEA.
 
-�����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 WORD.LST (pronounced "word-dot-list") is the generic term for the
 ASCII-format word file released into the Public Domain as a standard and
@@ -165,10 +176,10 @@ compromising, greed, and all other such nonsense. The WORD.LST is yours,
 word game players! Use it.  Help keep it updated and corrected. Distribute
 it (you do *not* need permission to do so, but tell us about it)!
 
-�����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 
-�����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 
 Scrabble and OSPD are trademarks owned by Milton Bradley, a division of
@@ -187,7 +198,7 @@ ENABLE is not a trademark. WORD.LST is not a trademark.
    This whole trademark business has been taken to ridiculous extremes.
 
 
-����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 
 Disclaimer: Neither I nor Alan Beale is in any way associated with the
@@ -200,7 +211,7 @@ more accurate, and therefore a more authoritative and generally useful
 replacement for the TWL98 list.
 
 
-����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 Important note:
 The supplementary archive, SUPP2K.ZIP, is a valuable adjunct to ENABLE. It
 supplies additional word lists, Alan Beale's "makelist" utility for combining
@@ -208,7 +219,7 @@ and expurgating lists, and the must-read documentation files on word list
 research on plurals. The resources in this supplement make possible creating
 one's own "SOWPODS" list, creating custom combined lists, or even lists with
 "nasty words" removed, suitable for family use.
-����������������������������������������������������������������������������
+â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹â€¹
 
 
 

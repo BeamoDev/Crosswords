@@ -43,25 +43,13 @@ end
 local Round = {}
 Round.__index = Round
 
-local function pathsMatch(expected, actual)
-	if type(expected) ~= "table" or type(actual) ~= "table" or #expected ~= #actual then return false end
-	local forward, backward = true, true
-	for index, point in ipairs(actual) do
-		if type(point) ~= "table" then return false end
-		local a, b = expected[index], expected[#expected - index + 1]
-		forward = forward and point.row == a.row and point.column == a.column
-		backward = backward and point.row == b.row and point.column == b.column
-	end
-	return forward or backward
-end
-
 function QueueState.NewRound(id, puzzle, members, mode)
 	local self = setmetatable({ id = id, mode = mode or "Standard", puzzle = puzzle, members = {}, order = {}, revision = 0 }, Round)
 	for _, member in ipairs(members) do
 		self.members[member.userId] = {
 			userId = member.userId, name = member.name, displayName = member.displayName,
 			isBot = member.isBot == true, thumbnailImage = member.thumbnailImage,
-			foundWords = {}, bonusWords = {}, foundOrder = {}, hintedWords = {}, hintUses = 0, count = 0, score = 0, xpEarned = 0, completed = false,
+			foundWords = {}, foundOrder = {}, hintedWords = {}, hintUses = 0, count = 0, score = 0, xpEarned = 0, completed = false,
 		}
 		table.insert(self.order, member.userId)
 	end
@@ -86,17 +74,15 @@ function Round:Expire(now)
 	return expired
 end
 
-function Round:FindWord(userId, word, path)
+function Round:FindWord(userId, word, answer)
 	local member = self.members[userId]
 	local expected = type(word) == "string" and self.puzzle.placedWordsByWord[word] or nil
 	if not member or member.completed or member.failed or member.foundWords[word] or not expected
 		then return false, false end
-	if self.puzzle.rules == "Strands" then
-		if not Engine.MatchesStrand(self.puzzle, word, path) then return false, false end
-	elseif not pathsMatch(expected.path, path) then return false, false end
+	if Engine.CheckAnswer(self.puzzle, word, answer) ~= true then return false, false end
 	member.foundWords[word] = true
 	member.foundOrder[word] = self.revision + 1
-	member.score += Score.Word(word, member.hintedWords[word] == true)
+	member.score += Score.Word(expected.answer, member.hintedWords[word] == true)
 	member.hintedWords[word] = nil
 	member.count += 1
 	member.completed = member.count == #self.puzzle.words
@@ -104,49 +90,14 @@ function Round:FindWord(userId, word, path)
 	return true, member.completed
 end
 
-function Round:FindBonusWord(userId, path)
-	local member = self.members[userId]
-	if not member or member.isBot or member.completed or member.failed then return nil end
-	local word = Engine.ReadBonusWord(self.puzzle, path)
-	if self.members[userId] ~= member or member.completed or member.failed
-		or not word or member.foundWords[word] or member.bonusWords[word] then return nil end
-	member.bonusWords[word] = true
-	self.revision += 1
-	return word
-end
-
--- Strands requires 3+ adjacent unique cells for a wrong-word loss.
--- Legacy fixtures below retain their straight-line contract.
-function Round:FailSelection(userId, path)
-	local member = self.members[userId]
-	if self.mode ~= "Hardcore" or not member or member.completed or member.failed
-		or type(path) ~= "table" or #path < 2 or #path > 32 then return false end
-	if self.puzzle.rules == "Strands" then
-		local word = Engine.ReadAdjacentWord(self.puzzle.letters, path)
-		if not word or #word < 3 or Engine.ReadBonusWord(self.puzzle, path) or self.puzzle.placedWordsByWord[word]
-			or self.puzzle.placedWordsByWord[string.reverse(word)] then return false end
-		member.failed = true
-		self.revision += 1
-		return true
-	end
-	local dr, dc
-	for index, point in ipairs(path) do
-		if type(point) ~= "table" or type(point.row) ~= "number" or type(point.column) ~= "number"
-			or point.row % 1 ~= 0 or point.column % 1 ~= 0
-			or not self.puzzle.letters[point.row] or not self.puzzle.letters[point.row][point.column] then return false end
-		if index > 1 then
-			local r, c = point.row - path[index - 1].row, point.column - path[index - 1].column
-			if math.abs(r) > 1 or math.abs(c) > 1 or (r == 0 and c == 0) then return false end
-			if dr and (r ~= dr or c ~= dc) then return false end
-			dr, dc = r, c
-		end
-	end
-	for _, placed in pairs(self.puzzle.placedWordsByWord) do
-		if pathsMatch(placed.path, path) then return false end
-	end
-	member.failed = true
-	self.revision += 1
-	return true
+-- Only a deliberate full-length incorrect answer can end Hardcore.
+function Round:FailSelection(userId, word, answer)
+    local member = self.members[userId]
+    if self.mode ~= "Hardcore" or not member or member.completed or member.failed or member.foundWords[word]
+        or Engine.CheckAnswer(self.puzzle, word, answer) ~= false then return false end
+    member.failed = true
+    self.revision += 1
+    return true
 end
 
 function Round:NextHint(userId)
@@ -176,20 +127,20 @@ function Round:Remove(userId)
 	return true
 end
 
-function Round:Snapshot(includePuzzle)
+function Round:Snapshot(includePuzzle, recipientId)
 	local members = {}
 	for _, userId in ipairs(self.order) do
 		local member = self.members[userId]
 		table.insert(members, {
 			userId = userId, name = member.name, displayName = member.displayName,
 			isBot = member.isBot, thumbnailImage = member.thumbnailImage,
-			bonusWords = table.clone(member.bonusWords), foundWords = table.clone(member.foundWords), foundOrder = table.clone(member.foundOrder), hintedWords = table.clone(member.hintedWords),
+			revealedAnswers = userId == recipientId and Engine.RevealedAnswers(self.puzzle, member.foundWords, member.hintedWords) or nil, foundWords = table.clone(member.foundWords), foundOrder = table.clone(member.foundOrder), hintedWords = table.clone(member.hintedWords),
 			count = member.count, score = member.score, xpEarned = member.xpEarned, duration = member.duration, completed = member.completed, failed = member.failed == true, timedOut = member.timedOut == true,
 		})
 	end
 	return { id = self.id, mode = self.mode, solo = self.solo == true, members = members, revision = self.revision,
 		timeLimit = self.timeLimit, expiresAt = self.expiresAt,
-		puzzle = includePuzzle and self.puzzle or nil }
+		puzzle = includePuzzle and Engine.PublicPuzzle(self.puzzle) or nil }
 end
 
 return QueueState

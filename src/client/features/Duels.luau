@@ -412,7 +412,7 @@ function Duels:updateOutcome(snapshot)
 	setText(self.elements.outcomeTitle, result.isDraw and "DRAW!" or result.isWinner and "YOU WON!" or "YOU LOST!")
 	setVisible(self.elements.winnerIcon, result.isWinner == true)
 	setVisible(self.elements.loserIcon, not result.isDraw and result.isWinner ~= true)
-	setText(frame:FindFirstChild("LevelTheme"), tostring(result.theme or "Strands") .. " | 1v1")
+	setText(frame:FindFirstChild("LevelTheme"), tostring(result.theme or "Crosswords") .. " | 1v1")
 	if Interface.UpdateOutcome(frame, snapshot and snapshot.progression) then return end
 	setText(frame:FindFirstChild("Words"), Interface.OutcomeWords(result.foundCount or 0, result.wordCount or 0, result.duration))
 	setText(frame:FindFirstChild("XPWon"), string.format("+%d XP", result.xpEarned or 0))
@@ -444,14 +444,16 @@ function Duels:showOutcome(payload)
 	end
 end
 
-function Duels:reportWordFound(word, progress, path)
+function Duels:reportWordFound(word, answer)
 	if self.remotes.reportProgress and self.inDuel then
 		self.remotes.reportProgress:FireServer({
 			word = word,
-			progress = progress,
-			path = path,
+			answer = answer,
+			matchId = self.activeMatchId,
 		})
+		return {success=true}
 	end
+	return nil
 end
 
 function Duels:reportCompletion()

@@ -2,7 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local shared = ReplicatedStorage:WaitForChild("shared")
-local Generator = require(shared.puzzle.PuzzleGenerator)
+local Generator = require(script.Parent.Parent.puzzle.PuzzleGenerator)
 local GameConfig = require(shared.config.GameConfig)
 local Score = require(ReplicatedStorage:WaitForChild("shared"):WaitForChild("config"):WaitForChild("ProgressionConfig")).Score
 local Workspace = game:GetService("Workspace")
@@ -47,23 +47,23 @@ local function handle(player, payload)
 	if player:GetAttribute("RoundBusy") or player:GetAttribute("DuelBusy") then return { success = false } end
 	if action == "Start" then
 		if not round or round.members[player.UserId].timedOut then
-			-- Practice fills a 3x3 grid with CAT, DOG and FOX; either direction is valid.
+			-- Connected CAT / CAR / RED crossword; practice never changes the profile.
 			local seed = 1739
 			local puzzle = Generator.Generate(Generator.BuildTutorialDefinition(seed), seed)
-			puzzle.title = "Animals"
+			puzzle.title = "First Crossword"
 			round = QueueState.NewRound(HttpService:GenerateGUID(false), puzzle, {
 				{ userId = player.UserId, name = player.Name, displayName = player.DisplayName },
 			})
 			round:SetTimer(Workspace:GetServerTimeNow(), GameConfig.RoundSeconds.Tutorial)
 			sessions[player.UserId] = round
 		end
-		return { success = true, round = round:Snapshot(true) }
+		return { success = true, round = round:Snapshot(true, player.UserId) }
 	end
 	if not round or payload.roundId ~= round.id then return { success = false } end
-	if action == "Sync" then return {success=true, round=round:Snapshot(false)} end
+	if action == "Sync" then return {success=true, round=round:Snapshot(false, player.UserId)} end
 	local accepted = false
 	if action == "Word" then
-		accepted = round:FindWord(player.UserId, payload.word, payload.path)
+		accepted = round:FindWord(player.UserId, payload.word, payload.answer)
 	elseif action == "Hint" then
 		local word = round:NextHint(player.UserId)
 		if word then round:MarkHint(player.UserId, word) accepted = true end
@@ -74,7 +74,7 @@ local function handle(player, payload)
 		member.score += Score.Completion(member.duration, round.timeLimit)
 	end
 	-- Practice never spends inventory, records wins, or awards XP/currency.
-	return { success = accepted, round = round:Snapshot(false) }
+	return { success = accepted, round = round:Snapshot(false, player.UserId) }
 end
 
 function TutorialService.Init(remote)

@@ -59,7 +59,7 @@ local action = {InvokeServer=function(_, payload)
 	elseif payload.action == "LeaveQueue" then
 		queueRevision += 1
 		return {success=true,queue={revision=queueRevision,count=0,members={}}}
-	elseif payload.action == "Word" and payload.word == "" then
+	elseif payload.action == "Word" and payload.answer == "BAD" then
 		return {success=false, round={id=activeRound.id, mode="Hardcore", revision=1, members={{userId=1, failed=true}}}}
 	elseif payload.action == "Join" then queueRevision += 1 return {success=true, queue={revision=queueRevision,count=1,deadline=15,members={{userId=1,name="Test",displayName="Test",level=20}}}}
 	end
@@ -199,7 +199,7 @@ for _, mode in ipairs({"Mini","Jumbo","Hardcore"}) do
 	ui.resume.Activated:Fire()
 	check(not ui.pause.Visible and board.callbacks.canInteract(), "Resume stays on current board")
 	if mode == "Hardcore" then
-		board.callbacks.invalidSelection({{row=1,column=1},{row=2,column=1}})
+		board.callbacks.submit("CAT", "BAD")
 		finishOutcomeDelay()
 		check(board.completed and shownOutcomes[#shownOutcomes].result.failed, "Hardcore failure opens results without needing an Exit or Subtitle")
 	end

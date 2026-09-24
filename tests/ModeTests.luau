@@ -1,165 +1,125 @@
-require("../src/shared/puzzle/PuzzleTests.spec")
-local Generator = require("../src/shared/puzzle/PuzzleGenerator")
+local Generator = require("../src/server/puzzle/PuzzleGenerator")
 local Engine = require("../src/shared/puzzle/PuzzleEngine")
 local Validator = require("../src/shared/puzzle/PuzzleValidator")
-local Catalog = require("../src/shared/content/PuzzleCatalog")
+local Bank = require("../src/server/content/CrosswordBank")
 local Queue = require("../src/server/services/QueueState")
-local checks, totalBoards, bentBoards = 0, 0, 0
-local orientations = {}
-local function check(value, reason) assert(value, reason) checks += 1 end
-local function verify(definition, seed)
-    check(Validator.ValidateDefinition(definition), "Definition validates")
-    local ok, puzzle = pcall(Generator.Generate, definition, seed)
-    assert(ok, tostring(Catalog.GetThemes()[1].title) .. "/" .. tostring(definition.mode) .. "/" .. seed .. ": " .. tostring(puzzle))
-    totalBoards += 1
-    local h, w = definition.gridSize, definition.gridWidth
-    check(puzzle.rules == "Strands" and #puzzle.letters == h, "Bending rules and height")
-    check(h == w and puzzle.gridWidth == w and puzzle.gridSize == h, "Dimensions describe actual grid")
-    local vocabulary = {}
-    for _, theme in ipairs(definition.beginner and Catalog.BeginnerThemes or Catalog.GetThemes()) do
-        if theme.title == puzzle.theme then
-            for _, word in ipairs(theme.words) do vocabulary[word] = true end
-        end
+local Editing = require("../src/shared/puzzle/CrosswordInput")
+local Contract = require("../src/shared/network/NetworkContract")
+local checks, boards = 0, 0
+local function check(value,message) assert(value,message) checks+=1 end
+local function key(cell) return cell.row..":"..cell.column end
+local function fingerprint(puzzle)
+    local parts={}
+    for _,id in ipairs(puzzle.words) do
+        local e=puzzle.placedWordsByWord[id]
+        table.insert(parts,id..":"..e.answer..":"..key(e.path[1]))
     end
-    local covered, count, bends = {}, 0, 0
-    local round = Queue.NewRound("test", puzzle, {{userId=1},{userId=2}})
-    for _, word in ipairs(puzzle.words) do
-        check(vocabulary[word], "Every answer, including the spanning word, belongs to its authored theme vocabulary: " .. word)
-        local path = puzzle.placedWordsByWord[word].path
-        local bucketName = definition.beginner and "Beginner" or definition.mode
-        local counts = orientations[bucketName] or {total=0, backwards=0}
-        orientations[bucketName] = counts
-        counts.total += 1
-        local first, last = path[1], path[#path]
-        local horizontal = math.abs(last.column-first.column) >= math.abs(last.row-first.row)
-        if (horizontal and last.column<first.column) or (not horizontal and last.row<first.row) then counts.backwards += 1 end
-        check(#path == #word and Engine.ReadAdjacentWord(puzzle.letters, path) == word, "Every path spells its word with adjacent unique tiles")
-        local lastR, lastC
-        for i, cell in ipairs(path) do
-            local key = cell.row .. ":" .. cell.column
-            check(not covered[key], "No words share a tile")
-            covered[key], count = true, count + 1
-            if i > 1 then
-                local dr, dc = cell.row-path[i-1].row, cell.column-path[i-1].column
-                if lastR and (dr ~= lastR or dc ~= lastC) then bends += 1 end
-                lastR, lastC = dr, dc
+    return table.concat(parts,"|")
+end
+local vocabulary={}
+for _,e in ipairs(Bank) do
+    check(not vocabulary[e.word] and e.word:match("^[A-Z]+$") and #e.clue>5,"Unique authored vocabulary with usable clues")
+    vocabulary[e.word]=e.clue
+end
+local function verify(definition,seed)
+    check(Validator.ValidateDefinition(definition),"Definition validates")
+    local p=Generator.Generate(definition,seed)
+    boards+=1
+    check(p.rules=="Crossword" and #p.words==definition.wordCount,"Exact requested clue count")
+    check(#p.letters==p.gridSize and #p.letters[1]==p.gridWidth and p.gridSize<=definition.gridSize and p.gridWidth<=definition.gridWidth,"Bounded dimensions match actual matrix")
+    local occupied,starts,numbers={}, {}, {}
+    for _,id in ipairs(p.words) do
+        local e=p.placedWordsByWord[id]
+        check(vocabulary[e.answer]==e.clue or p.tutorial,"Answers and clues come from authored bank")
+        check(e.length==#e.answer and e.length==#e.path,"Entry length agrees")
+        check(id==tostring(e.number)..(e.direction=="Across" and "A" or "D"),"Stable entry IDs")
+        local start=key(e.path[1]);starts[start]=e.number
+        if numbers[e.number] then check(numbers[e.number]==start,"Shared numbers share a starting square") else numbers[e.number]=start end
+        for i,cell in ipairs(e.path) do
+            check(p.letters[cell.row][cell.column]==e.answer:sub(i,i),"Every crossing spells both answers")
+            local k=key(cell);occupied[k]=occupied[k] or {}
+            table.insert(occupied[k],id)
+            check(#occupied[k]<=2,"No more than two entries share a square")
+            if i>1 then
+                local prev=e.path[i-1]
+                check(cell.row-prev.row==(e.direction=="Down" and 1 or 0) and cell.column-prev.column==(e.direction=="Across" and 1 or 0),"Straight forward Across/Down geometry")
             end
         end
-        check(round:FindWord(1, word, path), "Server accepts each canonical bending path")
-        check(not round:FindWord(1, word, path), "Duplicates cannot advance progress")
+        check(Engine.CheckAnswer(p,id,string.lower(e.answer))==true,"Answer accepted case-insensitively")
+        check(Engine.CheckAnswer(p,id,e.path)==nil and Engine.CheckAnswer(p,id,e.answer:sub(2))==nil,"Paths and incomplete answers rejected")
     end
-    check(count == h*w and round.members[1].completed and round.members[2].count == 0, "Complete coverage and independent human progress")
-    for _, row in ipairs(puzzle.letters) do check(#row == w, "No missing cells or ragged rows") end
-    local span = assert(puzzle.placedWordsByWord[puzzle.spangram], "Spangram is an actual answer")
-    local top,bottom,left,right = false,false,false,false
-    for _, c in ipairs(span.path) do
-        top,bottom = top or c.row==1,bottom or c.row==h
-        left,right = left or c.column==1,right or c.column==w
-    end
-    check(top and bottom or left and right, "Spangram touches opposite sides")
-    if bends > 0 then bentBoards += 1 end
-    return puzzle
-end
-local original = Catalog.GetThemes
-for _, theme in ipairs(original()) do
-    Catalog.GetThemes = function() return {theme} end
-    for _, mode in ipairs({"Standard","Mini","Jumbo","Hardcore","Duel","Timed"}) do
-        for sample = 1, 4 do verify(Generator.BuildDefinition(1, mode, sample*7919), sample*7919) end
-    end
-end
-Catalog.GetThemes = original
-for _, mode in ipairs({"Standard","Mini","Jumbo","Hardcore","Duel","Timed"}) do
-    local signatures = {}
-    for sample = 1, 100 do
-        local seed = sample == 100 and 2147483646 or sample*7919
-        local definition = Generator.BuildDefinition(1,mode,seed)
-        local puzzle = verify(definition,seed)
-        local signature = ""
-        for _, row in ipairs(puzzle.letters) do signature ..= table.concat(row) end
-        signatures[signature] = true
-        if sample == 1 then
-            local reverseRound = Queue.NewRound("reverse-"..mode,puzzle,{{userId=9}},mode)
-            local answer = puzzle.words[1]
-            local forward, reverse = puzzle.placedWordsByWord[answer].path, {}
-            for index = #forward, 1, -1 do table.insert(reverse, forward[index]) end
-            check(require("../src/shared/puzzle/PuzzleValidator").ValidateStrand(puzzle,reverse,answer), "Duel/shared validator accepts reversed path in "..mode)
-            check(reverseRound:FindWord(9,answer,reverse), "Reversed answer accepted in "..mode)
-            check(not reverseRound:FailSelection(9,reverse), "Reversed duplicate cannot cause Hardcore loss")
-            local again = Generator.Generate(definition,seed)
-            local repeated = ""
-            for _, row in ipairs(again.letters) do repeated ..= table.concat(row) end
-            check(signature == repeated and puzzle.spangram == again.spangram, "Same seed reproduces board and span")
+    -- Every nontrivial horizontal/vertical run must have exactly one clue.
+    local startDirection={}
+    for _,id in ipairs(p.words) do local e=p.placedWordsByWord[id];startDirection[key(e.path[1])..e.direction]=e.length end
+    for r,row in ipairs(p.letters) do for c,letter in ipairs(row) do
+        if letter~="" then
+            check(occupied[r..":"..c]~=nil,"No orphan letters")
+            for _,axis in ipairs({{0,1,"Across"},{1,0,"Down"}}) do
+                local dr,dc,dir=table.unpack(axis)
+                local before=p.letters[r-dr] and p.letters[r-dr][c-dc]
+                if not before or before=="" then
+                    local length=0
+                    while p.letters[r+dr*length] and p.letters[r+dr*length][c+dc*length] and p.letters[r+dr*length][c+dc*length]~="" do length+=1 end
+                    if length>1 then check(startDirection[r..":"..c..dir]==length,"No accidental unclued runs") end
+                end
+            end
         end
+    end end
+    local reached={[p.words[1]]=true}
+    for _=1,#p.words do for _,ids in pairs(occupied) do
+        if #ids==2 and (reached[ids[1]] or reached[ids[2]]) then reached[ids[1]],reached[ids[2]]=true,true end
+    end end
+    for _,id in ipairs(p.words) do check(reached[id],"All entries form one connected crossword") end
+    local public=Engine.PublicPuzzle(p)
+    check(public.seed==nil and public.placedWordsByWord[p.words[1]].answer==nil,"Public metadata excludes seed and answers")
+    for _,row in ipairs(public.letters) do for _,letter in ipairs(row) do check(letter=="" or letter==" ","Public cells never expose solution letters") end end
+    local round=Queue.NewRound("test",p,{{userId=1},{userId=2}},"Hardcore")
+    local id=p.words[1];local e=p.placedWordsByWord[id]
+    check(not round:FindWord(1,id,e.path) and not round:FailSelection(1,id,e.path),"Old path protocol cannot solve or lose")
+    check(round:MarkHint(1,id),"Hint marks one entry")
+    local snapshot=round:Snapshot(true,1)
+    check(snapshot.members[1].revealedAnswers[id]==e.answer and snapshot.members[2].revealedAnswers==nil,"Hint belongs only to requesting player")
+    check(round:Snapshot(false,2).members[1].revealedAnswers==nil,"Opponent cannot receive hinted answer")
+    for _,word in ipairs(p.words) do check(round:FindWord(1,word,p.placedWordsByWord[word].answer),"Correct answer completes once") end
+    check(round.members[1].completed and not round.members[2].completed,"Independent completion")
+    check(not round:FindWord(1,id,e.answer),"Duplicate cannot award score")
+    return p
+end
+for _,mode in ipairs({"Standard","Mini","Jumbo","Hardcore","Duel","Timed"}) do
+    local unique={}
+    for seed=1,120 do
+        local d=Generator.BuildDefinition(1,mode,seed*7919)
+        local p=verify(d,seed*7919)
+        unique[fingerprint(p)]=true
+        if seed<=3 then check(fingerprint(p)==fingerprint(Generator.Generate(d,seed*7919)),"Seeded generation deterministic") end
     end
-    local count = 0 for _ in pairs(signatures) do count += 1 end
-    check(count > 90, "Seeds vary the board in " .. mode)
+    local n=0 for _ in pairs(unique) do n+=1 end
+    check(n>110,"Seeds provide varied crosswords")
+    print("VERIFIED_MODE="..mode)
 end
-for solves = 0, 13 do
-    for sample = 1, 40 do
-        local definition = Generator.BuildClassicDefinition({},sample*17137,solves)
-        local puzzle = verify(definition,sample*17137)
-        check(puzzle.gridSize == (solves<10 and 5 or 7) and puzzle.gridWidth == puzzle.gridSize, "Saved solves choose beginner dimensions")
-    end
-end
-do
-    local beginnerThemes = Catalog.BeginnerThemes
-    for _, theme in ipairs(beginnerThemes) do
-        Catalog.BeginnerThemes = {theme}
-        for sample = 1, 20 do
-            local puzzle = verify(Generator.BuildClassicDefinition({},sample*9137,0),sample*9137)
-            check(puzzle.theme == theme.title, "Every beginner theme remains available")
-            check(not puzzle.placedWordsByWord.YUMMYFOOD and not puzzle.placedWordsByWord.LETSPLAY
-                and not puzzle.placedWordsByWord.ATHOME, "Theme titles cannot become joined-up answers")
-        end
-    end
-    Catalog.BeginnerThemes = beginnerThemes
-end
-for mode,counts in pairs(orientations) do
-    local ratio = counts.backwards / counts.total
-    local easy = mode == "Beginner" or mode == "Mini"
-    check(counts.total > 500 and ratio >= (easy and 0.015 or 0.10) and ratio <= (easy and 0.085 or 0.20), "Backward placements stay uncommon across seeded boards in "..mode..": "..ratio)
-    print(string.format("BACKWARDS_%s=%.1f%% (%d words)",mode,ratio*100,counts.total))
-end
-check(bentBoards == totalBoards, "Every generated board includes a bend")
-for _, mode in ipairs({"Classic","Themed","Freeplay","Unknown"}) do
-    check(not pcall(Generator.BuildDefinition,1,mode,1), "Retired modes reject")
-end
-local letters = {{"C","A","X"},{"A","T","Y"},{"Z","Q","Z"}}
-local path = {{row=1,column=1},{row=1,column=2},{row=2,column=2}}
-check(Engine.ReadAdjacentWord(letters,path)=="CAT", "A bent path is valid")
-check(not Engine.ReadAdjacentWord(letters,{{row=1,column=1},{row=3,column=3}}), "Cannot skip tiles")
-check(not Engine.ReadAdjacentWord(letters,{{row=1,column=1},{row=1,column=2},{row=1,column=1}}), "Cannot reuse a tile")
-check(not Engine.ReadAdjacentWord(letters,{{row=0,column=1}}), "Off-board rejects")
-check(not Engine.ReadAdjacentWord(letters,{{row=0/0,column=1}}), "Nonfinite coordinates reject")
-local p = {rules="Strands", letters=letters, words={"CAT"}, placedWordsByWord={CAT={path=path}}}
-check(not Engine.MatchesStrand(p,"CAT",{{row=1,column=1},{row=2,column=1},{row=2,column=2}}), "Cannot borrow another word's same-letter tile")
-local selection = {path[1]}
-check(Engine.ExtendAdjacentPath(selection,path[2]) and Engine.ExtendAdjacentPath(selection,path[3]), "Drag can bend")
-check(Engine.ExtendAdjacentPath(selection,path[2]) and #selection==2, "Backtracking removes the last tile")
-check(not Engine.ExtendAdjacentPath(selection,{row=3,column=3}), "Input ignores jumps")
-local hard = Queue.NewRound("hard",p,{{userId=1}},"Hardcore")
-local reverse = {path[3],path[2],path[1]}
-check(Engine.MatchesStrand(p,"CAT",reverse), "Shared matcher accepts backward bending words")
-check(not hard:FailSelection(1,reverse), "Correct reversed word never loses Hardcore")
-local backwards = Queue.NewRound("reverse",p,{{userId=1}},"Standard")
-check(backwards:FindWord(1,"CAT",reverse), "Server accepts reversed traversal")
-check(not backwards:FindWord(1,"CAT",path), "Forward submission after reversed solve cannot award twice")
-check(not hard:FailSelection(1,path), "Correct bending word never loses")
-check(not hard:FailSelection(1,{{row=1,column=1},{row=1,column=2}}), "Too-short gestures never lose")
-check(not hard:FailSelection(1,{{row=1,column=1},{row=1,column=2},{row=1,column=1}}), "Invalid geometry never loses")
-check(hard:FailSelection(1,{{row=1,column=1},{row=2,column=1},{row=2,column=2}})==false, "Alternative spelling of a theme word does not cause loss")
-check(hard:FailSelection(1,{{row=1,column=1},{row=2,column=1},{row=3,column=2}}), "Actual bent wrong word loses Hardcore")
-check(not hard:FindWord(1,"CAT",path), "Failed rounds cannot award a later word")
-do
-	local Dictionary = require("../src/shared/content/EnglishDictionary")
-	for _, word in ipairs({"COT","ATE","EAT","TEA","READ","READS","READING","QUIZZES","ZYMURGY"}) do check(Dictionary.Contains(word), "Dictionary accepts common words, inflections and end-of-alphabet entries") end
-	check(not Dictionary.Contains("QQQ") and not Dictionary.Contains("AB") and not Dictionary.Contains("cat"), "Dictionary rejects invalid spelling, short words and unnormalized input")
-	local bonus = Queue.NewRound("bonus",p,{{userId=1},{userId=2,isBot=true}},"Hardcore")
-	local alternate = {{row=1,column=1},{row=2,column=1},{row=2,column=2}}
-	check(bonus:FindBonusWord(1,alternate)=="CAT" and not bonus:FailSelection(1,alternate), "Valid alternate answer tiles earn bonus and never lose Hardcore")
-	check(not bonus:FindBonusWord(1,alternate) and not bonus:FindBonusWord(2,alternate), "Duplicate bonuses and bots never qualify")
-	check(bonus:FindWord(1,"CAT",path), "Finding a bonus never blocks canonical theme completion")
-	local practice = Generator.Generate(Generator.BuildTutorialDefinition(1),1)
-	check(not Engine.ReadBonusWord(practice,practice.placedWordsByWord.CAT.path), "Tutorial remains reward-free")
-end
-print("STRANDS_BOARDS="..totalBoards.." MODE_TESTS_PASSED="..checks)
+for seed=1,120 do verify(Generator.BuildClassicDefinition({},seed,0),seed) end
+verify(Generator.BuildTutorialDefinition(1),1)
+check(Generator.BuildClassicDefinition({},1,9).wordCount==5 and Generator.BuildClassicDefinition({},1,10).wordCount==7,"Beginner graduation keeps ten-solve gate")
+check(not pcall(Generator.BuildDefinition,1,"Classic",1),"Retired mode rejected")
+local p=Generator.Generate(Generator.BuildTutorialDefinition(1),1)
+local edit=Editing.new(Engine.PublicPuzzle(p))
+edit:Type("C") edit:Type("A") edit:Type("T")
+check(edit:Answer()=="CAT","Typed answer assembled")
+edit:Apply({["1A"]=true},{["1A"]="CAT"}) edit:Select("1D")
+edit:Type("A") edit:Type("R")
+check(edit:Answer()=="CAR" and edit.draft["3:1"]=="R","Crossing filled and locked letters skipped")
+edit:Select("2A") edit:Type("E") edit:Type("D")
+check(edit:Answer()=="RED","Unconfirmed draft crossing is shared")
+edit:Backspace() check(edit:Answer()==nil,"Erase removes last typed letter")
+edit:Apply({["1A"]=true},{["1A"]="CAT",["1D"]="CAR"})
+edit:Select("1D") edit:Backspace()
+check(edit.locked["1:1"]=="C" and edit.locked["3:1"]=="R","Hints/solves cannot be erased")
+edit:Select("2A") edit:SetAnswer("r-e-d!")
+check(edit:Answer()=="RED","Native whole-answer typing sanitizes text and keeps shared locks")
+edit:SetAnswer("bad")
+check(edit:Answer()=="RAD","Native typing cannot overwrite a revealed crossing")
+local round=Queue.NewRound("hard",p,{{userId=1}},"Hardcore")
+check(not round:FailSelection(1,"1A","CA") and not round:FailSelection(1,"missing","CAT"),"Malformed/incomplete attempts do not lose")
+check(round:FailSelection(1,"1A","DOG") and not round:FindWord(1,"1A","CAT"),"Full wrong answer loses Hardcore and blocks late solve")
+check(not Contract.IsBoundedValue(string.rep("A",257)) and not Contract.IsBoundedValue(0/0),"Network rejects unbounded strings and NaN")
+print("CROSSWORD_TESTS_PASSED="..checks.." BOARDS="..boards)

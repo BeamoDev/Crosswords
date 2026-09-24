@@ -110,50 +110,9 @@ function View:Start()
 	end
 	self.frame.Visible = true
 	self.frame.AnchorPoint = self.original.anchor
-	self.render = RunService.RenderStepped:Connect(function(dt) self:Layout() self:UpdateDragGuide(dt or 0) end)
+	self.render = RunService.RenderStepped:Connect(function(dt) self:Layout() end)
 end
 
--- Passive pointer demonstration follows the canonical cells at the current viewport size.
-function View:SetDragGuide(grid, path, columns, rows, busy)
-	if self.dragImage then self.dragImage:Destroy() self.dragImage = nil end
-	self.dragGuide = nil
-	if not grid or not path or not self.root then return end
-	local image = Instance.new("ImageLabel")
-	image.Name, image.Image = "TutorialDragGuide", "rbxassetid://130798161958633"
-	image.BackgroundTransparency, image.ImageTransparency = 1, 1
-	image.Active, image.Selectable, image.Visible = false, false, false
-	image.AnchorPoint = Vector2.new(0.25, 0.15)
-	image.ZIndex, image.Parent = Z + 3, self.root
-	self.dragImage = image
-	self.dragGuide = {grid=grid, path=path, columns=columns, rows=rows, busy=busy, elapsed=0}
-end
-
-function View:UpdateDragGuide(dt)
-	local guide, image = self.dragGuide, self.dragImage
-	if not guide or not image then return end
-	if not guide.grid.Parent or not self.active then self:SetDragGuide(nil) return end
-	if self.typing or self.transitioning or not self.ui.game.Visible or (guide.busy and guide.busy()) then
-		image.Visible, guide.elapsed = false, 0
-		return
-	end
-	local travelEnd = 0.35 + (#guide.path - 1) * 0.7
-	local fadeStart = travelEnd + 0.4
-	guide.elapsed = (guide.elapsed + math.clamp(dt, 0, 0.1)) % (fadeStart + 1.4)
-	local elapsed = guide.elapsed
-	local position = math.clamp((elapsed - 0.35) / 0.7, 0, #guide.path - 1)
-	local index = math.min(#guide.path, math.floor(position) + 1)
-	local first, last = guide.path[index], guide.path[math.min(index + 1, #guide.path)]
-	local alpha = (1 - math.cos((position - math.floor(position)) * math.pi)) / 2
-	local column = first.column + (last.column - first.column) * alpha
-	local row = first.row + (last.row - first.row) * alpha
-	local size, origin = guide.grid.AbsoluteSize, guide.grid.AbsolutePosition - self.root.AbsolutePosition
-	local pixels = math.clamp(math.min(size.X / guide.columns, size.Y / guide.rows) * 0.55, 24, 72)
-	image.Size = UDim2.fromOffset(pixels, pixels)
-	image.Position = UDim2.fromOffset(origin.X + (column - 0.5) / guide.columns * size.X,
-		origin.Y + (row - 0.5) / guide.rows * size.Y)
-	image.ImageTransparency = elapsed < 0.25 and (1 - elapsed / 0.25) or math.clamp((elapsed - fadeStart) / 0.3, 0, 1)
-	image.Visible = image.ImageTransparency < 1
-end
 
 function View:LayoutCorners(opening, padding)
 	-- Twice the padding rounds the opening without touching the actual target.
@@ -275,7 +234,6 @@ end
 
 -- Keep the transparent input blocker while the normal screen transition runs.
 function View:Suspend()
-	self:SetDragGuide(nil)
 	self.frame.Visible = false
 	self.target, self.allowTarget, self.hasStep = nil, false, false
 	self:Layout(true)
@@ -302,7 +260,6 @@ function View:TweenFrame(size, scale, duration, direction, position)
 end
 
 function View:Show(title, message, target, autoAdvance, allowTarget, focusTarget, centered)
-	self:SetDragGuide(nil)
 	if not self.active then return end
 	self:FinishTyping() -- invalidates the old typewriter and reading timer
 	self:CancelTransition()
@@ -445,7 +402,6 @@ function View:Celebrate()
 end
 
 function View:Close()
-	self:SetDragGuide(nil)
 	if self.cancelConfetti then self.cancelConfetti() self.cancelConfetti = nil end
 	self.active = false
 	self:FinishTyping()

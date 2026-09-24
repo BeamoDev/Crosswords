@@ -201,18 +201,13 @@ function GameController.Start()
 		canInteract = canInteract,
 		blocksPointer = function(position) return tutorial and tutorial:BlocksPointer(position) end,
 		playSound = playSound,
-		invalidSelection = function(path)
-			if state.mode == "Hardcore" and state.round then
-				invoke({ action = "Word", roundId = state.round.id, word = "", path = path })
-			end
-		end,
-		submit = function(word, path)
+		submit = function(word, answer)
 			if tutorial and tutorial:IsActive() then
-				tutorial:Submit(word, path)
+				return tutorial:Submit(word, answer)
 			elseif state.round then
-				invoke({ action = "Word", roundId = state.round.id, word = word, path = path })
+				return invoke({ action = "Word", roundId = state.round.id, word = word, answer = answer })
 			elseif state.mode == "Duel" and state.duelStarted then
-				duel:reportWordFound(word, 0, path)
+				return duel:reportWordFound(word, answer)
 			end
 		end,
 	})
@@ -392,9 +387,10 @@ function GameController.Start()
 		end,
 		onProgress = function(payload)
 			if state.mode ~= "Duel" or state.duelId ~= payload.matchId then return end
+			if payload.rejectedEntry then board:Reject(payload.rejectedEntry) return end
 			state.duelMembers[1].score = payload.myScore or 0
 			state.duelMembers[1].foundWords = payload.myFoundWords or {}
-			state.duelMembers[1].bonusWords = payload.myBonusWords or {}
+			state.duelMembers[1].revealedAnswers = payload.myRevealedAnswers or {}
 			state.duelMembers[2].foundWords = payload.opponentFoundWords or {}
 			applyDuelProgress()
 		end,
@@ -543,6 +539,7 @@ function GameController.Start()
 					local words = {}
 					for _, word in ipairs(result.boardState.hintedWords or {}) do words[word] = true end
 					state.duelMembers[1].hintedWords = words
+					state.duelMembers[1].revealedAnswers = result.boardState.revealedAnswers or {}
 					board:Progress(state.duelMembers)
 				end
 			end

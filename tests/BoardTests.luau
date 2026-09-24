@@ -1,4 +1,4 @@
-require("../src/shared/puzzle/PuzzleTests.spec")
+require("./TestSupport")
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local rbx = require("@lune/roblox")
@@ -16,7 +16,7 @@ local Node = {}
 local meta = {
 	__index = function(self, key)
 		if Node[key] then return Node[key] end
-		return self.props[key]
+		return self.props[key] or Node.FindFirstChild(self,key)
 	end,
 	__newindex = function(self, key, value)
 		if key == "Parent" then
@@ -38,9 +38,10 @@ local function instance(class)
 		Position = rbx.UDim2.fromScale(0, 0), BackgroundColor3 = rbx.Color3.new(1, 1, 1), Scale = 1,
 		MouseEnter = signal(), MouseLeave = signal(), MouseButton1Down = signal(), MouseButton1Up = signal(), Destroying = signal(),
 		AbsolutePosition = rbx.Vector2.new(0, 0), AbsoluteSize = rbx.Vector2.new(600, 400),
-		Activated = signal(), SelectionGained = signal(), Size = rbx.UDim2.fromScale(1, 1),
+		Activated = signal(), SelectionGained = signal(), Focused = signal(), FocusLost = signal(), Size = rbx.UDim2.fromScale(1, 1),
 	} }, meta)
 end
+function Node:IsFocused() return self.props.focused == true end
 function Node:GetChildren() return table.clone(self.children) end
 function Node:GetDescendants()
 	local result = {}
@@ -97,7 +98,7 @@ add(playerTemplate, "UIStroke", "UIStroke")
 local engine = require("../src/shared/puzzle/PuzzleEngine")
 local function waitForChild(self, name) return assert(self[name], name) end
 local config = require("../src/shared/config/ProgressionConfig")
-local shared = { puzzle = { PuzzleEngine = engine }, ui = { WaitForChild = waitForChild },
+local shared = { puzzle = { PuzzleEngine = engine, CrosswordInput=require("../src/shared/puzzle/CrosswordInput") }, ui = { WaitForChild = waitForChild },
 	config = { ProgressionConfig = config, WaitForChild = waitForChild }, WaitForChild = waitForChild }
 local storage = { WaitForChild = function(_, name) return name == "shared" and shared or assets end }
 local players = { LocalPlayer = { UserId = 1, DisplayName = "Alice" },
@@ -163,210 +164,61 @@ ui.timed.Position = rbx.UDim2.new(0.47, 8, 0.11, -3)
 local allowed, submissions, sounds = true, {}, {}
 local board = Board.new(ui, {
 	canInteract = function() return allowed end, playSound = function(name) table.insert(sounds, name) end,
-	submit = function(word, path) table.insert(submissions, { word = word, path = path }) end,
+	submit = function(word, answer) table.insert(submissions, { word = word, answer = answer }) return {success=true} end,
 })
-local puzzle = {
-	title = "Ocean", words = { "DOG", "CAT" },
-	letters = { { "C", "A", "T" }, { "D", "O", "G" } },
-	placedWordsByWord = {
-		CAT = { path = { { row = 1, column = 1 }, { row = 1, column = 2 }, { row = 1, column = 3 } } },
-		DOG = { path = { { row = 2, column = 1 }, { row = 2, column = 2 }, { row = 2, column = 3 } } },
-	},
-}
-board:Build(puzzle, "Standard")
-check(not board:Interactive() and board.tiles[1][1].TextTransparency == 1, "Entrance hides letters and locks input")
-check(sounds[#sounds] == "Appear", "Entrance plays authored sound")
-check(not board:Begin(rbx.Vector2.new(100, 100), { UserInputType = rbx.Enum.UserInputType.MouseButton1 }) and not board.startCell, "Locked board cannot begin pointer gesture during introduction")
-advance(0.6)
-check(board:Interactive() and board.tiles[1][1].TextTransparency == 0, "Entrance reveals letters and releases input")
-check(not board.grid:FindFirstChild("BoardRevealScale"), "Entrance removes its temporary scale")
-check(ui.boardPanel:FindFirstChildOfClass("UIAspectRatioConstraint").AspectRatio == 1.5, "Rectangular grid aspect")
-check(ui.boardPanel.Position == rbx.UDim2.fromScale(0.39, 0.5), "Rectangular board position")
-check(ui.wordPanel.Position == rbx.UDim2.fromScale(0.75, 0.5), "Rectangular word panel position")
-check(ui.title.Text == "THEMES" and ui.subtitle.Text == "Ocean" and ui.subtitle.Visible, "Themed title")
-check(ui.words.Text == "0/2" and #ui.wordList:GetChildren() == 2, "Authored word rows cloned")
-local function countChildren(root, name)
-	local count = 0
-	for _, child in ipairs(root:GetChildren()) do if child.Name == name then count += 1 end end
-	return count
+local Generator = require("../src/server/puzzle/PuzzleGenerator")
+local private = Generator.Generate(Generator.BuildTutorialDefinition(51),51)
+local puzzle = engine.PublicPuzzle(private)
+local function countChildren(root,name)
+    local count=0 for _,child in ipairs(root:GetChildren()) do if child.Name==name then count+=1 end end return count
 end
-local row = board.rows.CAT
-check(row:FindFirstChild("BreakLine").Visible and row:FindFirstChild("Word").Text == "CAT" and not row:FindFirstChild("PlayerTemplate").Visible, "Unsolved row keeps its divider without a strike-through")
-board:Progress({ { userId = 1, foundWords = {} }, { userId = 2, foundWords = { CAT = true } } })
-check(ui.words.Text == "0/2" and row:FindFirstChild("BreakLine").Visible and row:FindFirstChild("Word").Text == "CAT" and row.LayoutOrder > board.rows.DOG.LayoutOrder, "Other finds keep the divider without striking or moving own word")
-check(countChildren(board.grid, "WordSpark") == 0 and #sounds == 1, "Opponent finds do not trigger own success feedback")
-local otherPortrait = row:FindFirstChild("FoundPanel"):FindFirstChild("Finder_2")
-check(otherPortrait and otherPortrait.Image == "headshot:2" and otherPortrait.Visible, "Other finder gets a mugshot")
-board:Progress({ { userId = 1, foundWords = {} }, { userId = 2, foundWords = { CAT = true } }, { userId = -1000000000, isBot = true, thumbnailImage = "bot-avatar", foundWords = { CAT = true } } })
-check(row:FindFirstChild("FoundPanel"):FindFirstChild("Finder_-1000000000").Image == "bot-avatar", "Bot finder uses its resolved Roblox image instead of its simulated ID")
-check(ui.words.Text == "0/2" and row:FindFirstChild("Word").Text == "CAT", "Bot solves never solve the local player's word")
-board:Progress({ { userId = 1, foundWords = { CAT = true } }, { userId = 2, foundWords = { CAT = true } } })
-check(ui.words.Text == "1/2" and row:FindFirstChild("BreakLine").Visible and row:FindFirstChild("Word").RichText and row:FindFirstChild("Word").Text == "<s>CAT</s>" and row.LayoutOrder < board.rows.DOG.LayoutOrder, "Own find strikes the word and moves it above an earlier unsolved row")
-check(row:FindFirstChild("FoundPanel"):FindFirstChild("Finder_1") ~= nil, "Own mugshot is shown")
-check(board.lines.Found_CAT and board.lines.Found_CAT.Visible, "Own found path persists on board")
-check(countChildren(board.grid, "WordSpark") == 10 and sounds[#sounds] == "NotificationHigh", "Confirmed own word gets particles and success sound")
-local soundsAfterFind = #sounds
-board:Progress({ { userId = 1, foundWords = { CAT = true } }, { userId = 2, foundWords = { CAT = true } } })
-check(#sounds == soundsAfterFind and countChildren(board.grid, "WordSpark") == 10, "Repeated snapshots do not replay success effects")
-advance(0.5)
-check(countChildren(board.grid, "WordSpark") == 0, "Success particles clean up")
-local color = otherPortrait.BackgroundColor3
-local _, saturation, value = color:ToHSV()
-check(saturation >= 0.75 and saturation <= 0.85 and value >= 0.85 and value <= 0.95, "Portrait background uses about 80 percent saturation")
-check(board:PortraitColor(2) == color, "Portrait color stays fixed within a round")
-check(otherPortrait:FindFirstChildOfClass("UIStroke").Color == color:Lerp(rbx.Color3.new(), 0.3), "Portrait stroke is darker")
-board:Progress({ { userId = 1, foundWords = { CAT = true }, hintedWords = { DOG = true } } })
-check(row:FindFirstChild("FoundPanel"):FindFirstChild("Finder_2") == nil, "Departed finder removed")
-check(board.lines.Hint_DOG and board.lines.Hint_DOG.Visible, "Hints preserve path visualization");
-(function()
-	local pulse = board.hintPulses.DOG
-	check(type(pulse) == "function" and board.lines.Hint_DOG.BackgroundTransparency == 0.30, "Hint starts its own pulse")
-	advance(0.85)
-	check(board.lines.Hint_DOG.BackgroundTransparency == 0.78, "Hint fades away from the solid found-word appearance")
-	board:RefreshLines()
-	check(board.hintPulses.DOG == pulse and board.lines.Hint_DOG.BackgroundTransparency == 0.78, "Refresh/drag updates preserve the pulse instead of restarting it")
-	local pulseTween
-	for _, tween in ipairs(tweenService.created) do
-		if tween.node == board.lines.Hint_DOG and tween.info.RepeatCount == -1 then pulseTween = tween end
-	end
-	check(pulseTween and pulseTween.info.Reverses == true, "Hint tween repeats in both directions continuously")
-	ui.game.Visible = false
-	check(board.hintPulses.DOG == nil, "Hiding Game cancels hint pulse work")
-	ui.game.Visible = true
-	check(board.hintPulses.DOG ~= nil and board.hintPulses.DOG ~= pulse, "Showing the same board starts a fresh hint pulse")
-
-end)()
-
-local input = { UserInputType = "MouseButton1" }
-board:Begin(rbx.Vector2.new(100, 300), input)
-local initialDragPosition = board.lines.Selection.Position
-board:Move(rbx.Vector2.new(300, 300))
-check(board.lines.Selection.Position == initialDragPosition and #board.selection == 2, "Logical target advances before the visual tween")
-advance(0.03)
-board:Move(rbx.Vector2.new(500, 300))
-advance(0.055)
-check(board.lines.Selection.Position == initialDragPosition, "Superseded drag tween cannot move the highlight")
-board:Move(rbx.Vector2.new(500, 300))
-advance(0.03)
-check(board.lines.Selection.Position == rbx.UDim2.fromOffset(300, 300), "Same-cell events do not restart the tween")
-board:Move(rbx.Vector2.new(300, 300))
-board:Move(rbx.Vector2.new(500, 300))
-local dragColor = board.lines.Selection.BackgroundColor3
-check(dragColor ~= board.lines.Found_CAT.BackgroundColor3, "Next drag uses a different vibrant color")
-check(board.lines.Selection.Size.Y.Offset == rbx.UDim2.fromOffset(0, 200 * 0.68 * 1.15 * 1.20 * 0.85).Y.Offset, "Selection thickness and rounded caps shrink by 15 percent")
-board:Finish()
-check(#submissions == 1 and submissions[1].word == "DOG", "Arithmetic pointer selection submits matching path")
-check(not board.startCell and not board.activeInput, "Release clears gesture")
-board:Begin(rbx.Vector2.new(500, 100), input)
-local restartedPosition = board.lines.Selection.Position
-advance(0.1)
-check(board.lines.Selection.Position == restartedPosition, "Released drag tween cannot move a new gesture")
-board:Cancel()
-board:Progress({ { userId = 1, foundWords = { CAT = true, DOG = true } } })
-check(board.lines.Found_DOG.BackgroundColor3 == dragColor, "Validated word preserves its drag color")
-check(board.hintPulses.DOG == nil and not board.lines.Hint_DOG.Visible, "Solving the hinted word cancels its pulse and hides its hint path")
-check(board.lines.Found_DOG.BackgroundColor3 ~= board.lines.Found_CAT.BackgroundColor3, "Found words keep distinct colors")
-check(sounds[#sounds] == "Victory", "Completion plays victory sound")
-local ownPortraitColor = row:FindFirstChild("FoundPanel"):FindFirstChild("Finder_1").BackgroundColor3
-check(board.rows.DOG:FindFirstChild("FoundPanel"):FindFirstChild("Finder_1").BackgroundColor3 == ownPortraitColor, "Same player uses one portrait color across words")
-allowed = false
-check(not board:Begin(rbx.Vector2.new(100, 300), input), "Central interaction lock blocks drag")
-allowed = true
-local square = table.clone(puzzle)
-square.letters = { { "C", "A", "T" }, { "D", "O", "G" }, { "X", "Y", "Z" } }
-board:Build(square, "Duel")
-check(ui.timed.Position == rbx.UDim2.fromScale(0.5,0.03), "Duel positions TimedMode at top center with zero offsets")
-check(board:PortraitColor(1) ~= ownPortraitColor, "New round chooses a new portrait color")
-check(ui.boardPanel:FindFirstChildOfClass("UIAspectRatioConstraint").AspectRatio == 1, "Square aspect")
-check(ui.boardPanel.Position == rbx.UDim2.fromScale(0.387, 0.5) and ui.wordPanel.Position == rbx.UDim2.fromScale(0.667, 0.5), "Square positions")
-check(ui.title.Text == "1V1" and not ui.subtitle.Visible and ui.duel.Visible, "Duel header")
-local youWinRate = add(ui.duel, "TextLabel", "YouWinRate")
-local enemyWinRate = add(ui.duel, "TextLabel", "EnemyWinRate")
-board:DuelPlayers(2, "Bob", nil, { wins = 3, losses = 1 }, { wins = 1, losses = 3 })
-check(youWinRate.Visible and enemyWinRate.Visible and youWinRate.Text == "75% Win Rate" and enemyWinRate.Text == "25% Win Rate", "Duel HUD shows both saved win percentages");
-(function()
-	local mugshot = add(ui.duel, "ImageLabel", "EnemyMugshot")
-	local placeholder = add(mugshot, "ImageLabel", "Profile")
-	board:DuelPlayers(-3000000000, "milo", "rbxassetid://verified-bot", {wins=0,losses=0}, {wins=2,losses=1})
-	check(youWinRate.Text == "0% Win Rate" and enemyWinRate.Text == "67% Win Rate", "Zero-match and bot records render finite rounded percentages")
-	board:DuelWinRates({wins=1,losses=0}, {wins=2,losses=2})
-	check(youWinRate.Text == "100% Win Rate" and enemyWinRate.Text == "50% Win Rate", "Completed matches refresh visible win-rate labels")
-	check(mugshot.Image == "rbxassetid://verified-bot" and not placeholder.Visible, "Duel HUD uses the supplied bot portrait instead of a negative account ID")
- local score = add(ui.duel, "TextLabel", "YouScore")
- score.TextColor3, score.Rotation = rbx.Color3.fromRGB(3,36,66), 2
- local originalColor = score.TextColor3
- local scale = add(score, "UIScale", "AuthoredScale")
- scale.Scale = 0.9
- board:DuelScores(0,0)
- board:DuelScores(1,0)
- advance(0.17)
- check(score.Text == "1" and score.TextColor3 == rbx.Color3.fromRGB(43,225,58) and score.Rotation == 7 and scale.Scale > 0.9, "Duel score change flashes green, grows and tilts")
- local cancel = board.scoreEffects.YouScore
- board:DuelScores(1,0)
- check(board.scoreEffects.YouScore == cancel, "Duplicate progress does not restart the score effect")
- board:DuelScores(2,0)
- advance(0.5)
- check(score.TextColor3 == originalColor and score.Rotation == 2 and scale.Scale == 0.9, "Rapid Duel score changes restore authored color, rotation and scale")
- board:DuelScores(3,0)
- board:DuelPlayers(-3000000000, "milo", "rbxassetid://verified-bot")
- advance(0.5)
- check(score.Rotation == 2 and score.TextColor3 == originalColor and scale.Scale == 0.9, "New Duel cancels outstanding score effects")
-	board:Progress({ { userId = -3000000000, isBot = true, thumbnailImage = "rbxassetid://verified-bot", foundWords = { CAT = true } } })
-	local finder = board.rows.CAT:FindFirstChild("FoundPanel"):FindFirstChild("Finder_-3000000000")
-	check(finder and finder.Image == "rbxassetid://verified-bot", "Duel bot finder portraits retain the verified avatar")
-end)()
-
-board:Build(square, "Standard", true)
-board:Progress({{userId=1,foundWords={CAT=true}}})
-check(not board.rows.CAT:FindFirstChild("FoundPanel"):FindFirstChild("Finder_1") and board.found.CAT, "Solo Classic retains solved words without finder portraits")
-check(#ui.wordList:GetChildren() == 2, "Rebuilding does not duplicate word rows")
-advance(0.3)
-board:Build(square, "Timed")
-advance(0.3)
-check(not board:Interactive(), "Old reveal completion cannot unlock a newer board")
-advance(0.3)
-check(board:Interactive(), "New board unlocks after its own reveal")
-local wrongSounds = #sounds
-local inputCount = #submissions
-board:Begin(rbx.Vector2.new(100, 330), input)
-board:Move(rbx.Vector2.new(500, 330))
-board:Finish()
-check(#submissions == inputCount and #sounds == wrongSounds + 1 and sounds[#sounds] == "Error2", "Wrong word plays Error2 without submitting")
-check(countChildren(board.grid, "WrongWordFeedback") == 1, "Wrong selection retains a red shaking line")
-check(board:Begin(rbx.Vector2.new(100, 66), input), "Wrong feedback does not block next gesture")
-check(not board.grid:FindFirstChild("WrongWordFeedback"), "A fresh gesture immediately clears the previous error snapshot")
-local newDrag = board.lines.Selection.BackgroundColor3
-advance(0.5)
-check(countChildren(board.grid, "WrongWordFeedback") == 0 and board.startCell ~= nil, "Wrong effect cleans up without cancelling new drag")
-check(board.lines.Selection.BackgroundColor3 == newDrag, "Old wrong effect cannot recolor the next gesture")
-board:Cancel()
-board:ActivateCell({ row = 1, column = 1 })
-check(board.lines.Selection.BackgroundColor3 ~= newDrag, "Keyboard/gamepad selection advances the vibrant palette")
-board:KeyboardMove(0, 1)
-check(board.cursor.column == 2 and #board.selection == 2 and focus.SelectedObject == nil, "Keyboard movement extends the word path without setting UI focus")
-board:Cancel()
-check(ui.title.Text == "TIMED" and not ui.subtitle.Visible and ui.timed.Visible, "Timed header presentation")
-board:Progress({ { userId = 1, foundWords = { CAT = true, DOG = true } } })
-check(board.completed and not board:Interactive(), "Completion locks further selections")
-local invalidPaths = {}
-board.callbacks.invalidSelection = function(path) table.insert(invalidPaths, path) end
-board:Build(square, "Hardcore")
+board:Build(puzzle,"Standard")
+check(not board:Interactive(),"Entrance locks typing")
 advance(0.6)
-check(ui.title.Text == "HARDCORE" and ui.subtitle.Text == "One wrong word ends the round", "Hardcore explains its loss rule")
-board:Begin(rbx.Vector2.new(100, 330), input)
-board:Move(rbx.Vector2.new(500, 330))
+check(board:Interactive(),"Entrance unlocks typing")
+check(board.tiles[1][1].Text=="" and not board.tiles[2][2],"Blank playable cells and blocked squares render separately")
+check(board.tiles[1][1]:FindFirstChild("Number").Text=="1","Shared starting cell has its clue number")
+check(board.rows["1A"]:FindFirstChild("Word").Text:find("pet that says meow",1,true),"Clue text is visible before solving")
+check(not board.rows["1A"]:FindFirstChild("Word").Text:find("CAT",1,true),"Unsolved answer is not printed in clue list")
+check(board.keyboard:FindFirstChild("Key_CHECK") and board.keyboard:FindFirstChild("Key_Z"),"Touch/gamepad keyboard has every letter and Check")
+board:Key("C") board:Key("A") board:Key("T")
+check(board.editing:Answer()=="CAT" and #submissions==0,"Full answer waits for explicit Check")
 board:Finish()
-check(#invalidPaths == 1 and #invalidPaths[1] == 3, "Hardcore sends full incorrect path for server validation")
-check(sounds[#sounds] == "Error2" and not board.busy, "Hardcore retains wrong effects and releases pending request")
-for _, mode in ipairs({ "Mini", "Jumbo" }) do
-	board:Build(square, mode)
-	advance(0.6)
-	check(ui.title.Text == string.upper(mode) and ui.subtitle.Visible, "Solo mode header and theme")
-	board:Begin(rbx.Vector2.new(100, 330), input)
-	board:Move(rbx.Vector2.new(500, 330))
-	board:Finish()
-	check(#invalidPaths == 1, "Casual solo mistakes do not submit a loss")
-end
+check(#submissions==1 and submissions[1].answer=="CAT" and submissions[1].word=="1A","Check sends entry ID and typed answer")
+board:Progress({{userId=1,foundWords={},revealedAnswers={}},{userId=2,foundWords={["1A"]=true}}})
+check(not board.found["1A"] and ui.words.Text=="0/3","Opponent does not solve local clue")
+local row=board.rows["1A"]
+check(row.FoundPanel:FindFirstChild("Finder_2")~=nil,"Opponent finder portrait remains supported")
+board:Progress({{userId=1,foundWords={["1A"]=true},revealedAnswers={["1A"]="CAT"},score=300}})
+check(board.editing.locked["1:1"]=="C" and board.editing.selected=="1D","Accepted answer locks crossing and advances clue")
+local soundCount=#sounds
+board:Progress({{userId=1,foundWords={["1A"]=true},revealedAnswers={["1A"]="CAT"},score=300}})
+check(#sounds==soundCount,"Repeated progress does not replay success")
+board:Key("A") board:Key("R")
+check(board.editing:Answer()=="CAR","Typing skips locked crossing")
+board:Progress({{userId=1,foundWords={["1A"]=true},hintedWords={["1D"]=true},revealedAnswers={["1A"]="CAT",["1D"]="CAR"}}})
+check(board.editing.locked["3:1"]=="R" and not board.found["1D"],"Hint reveals letters but does not complete entry")
+board:Reject("1D")
+check(board.feedback and sounds[#sounds]=="Error2","Server rejection shows feedback")
+allowed=false
+local prior=board.editing:Answer() board:Key("Z")
+check(board.editing:Answer()==prior,"Modal/transition lock blocks typing")
+allowed=true
+board:Build(puzzle,"Duel") advance(0.6)
+check(ui.timed.Position==rbx.UDim2.fromScale(0.5,0.03),"Duel timer moves to authored Duel slot")
+board:Build(puzzle,"Standard") advance(0.6)
+check(ui.timed.Position==rbx.UDim2.new(0.47,8,0.11,-3),"Other modes restore timer including offsets")
+local box=board.keyboard:FindFirstChild("TypeAnswer")
+box.focused=true
+for _,fn in ipairs(box.Focused.callbacks) do fn() end
+box.Text="cat"
+check(board.editing:Answer()=="CAT","User-focused native keyboard fills the selected entry")
+local beforeNative=#submissions
+box.focused=false
+for _,fn in ipairs(box.FocusLost.callbacks) do fn(true) end
+check(#submissions==beforeNative+1,"Native keyboard Enter submits the full answer")
+local ownPortraitColor=board:PortraitColor(1)
+local input={UserInputType="MouseButton1"}
 local Interface = luau.load(fs.readFile("src/client/controllers/InterfaceController.luau"), { environment = environment })();
 (function()
 	local panel = add(assets, "Frame", "TimedModeTest")
@@ -635,7 +487,7 @@ board:Build(puzzle, "Standard")
 local crowd = { { userId = 1, foundWords = {} } }
 local function checkFinders(expectedCount, expectedExtra)
 	board:Progress(crowd)
-	local panel = board.rows.CAT:FindFirstChild("FoundPanel")
+	local panel = board.rows["1A"]:FindFirstChild("FoundPanel")
 	local count = 0
 	for _, child in ipairs(panel:GetChildren()) do
 		if child.Name:sub(1, 7) == "Finder_" then count += 1 end
@@ -643,12 +495,12 @@ local function checkFinders(expectedCount, expectedExtra)
 	check(count == expectedCount, "Finder portraits never exceed three")
 	local extra = panel:FindFirstChild("Exceeds")
 	check(expectedExtra == 0 and extra == nil or expectedExtra > 0 and extra and extra:FindFirstChild("TextLabel").Text == "+" .. expectedExtra, "Exceeds shows the exact additional finder count")
-	check(ui.words.Text == "0/2", "Overflow finders do not solve the local word")
+	check(ui.words.Text == "0/3", "Overflow finders do not solve the local word")
 	return extra
 end
 checkFinders(0, 0)
 for id = 2, 13 do
-	table.insert(crowd, {userId = id, foundWords = {CAT = true}, isBot = id % 2 == 0, thumbnailImage = "test-avatar"})
+	table.insert(crowd, {userId = id, foundWords = {["1A"] = true}, isBot = id % 2 == 0, thumbnailImage = "test-avatar"})
 	checkFinders(math.min(id - 1, 3), math.max(0, id - 4))
 end
 local overflow = checkFinders(3, 9)
@@ -658,13 +510,13 @@ while #crowd > 1 do
 	checkFinders(math.min(#crowd - 1, 3), math.max(0, #crowd - 4))
 end
 local finishers = {
-	{userId = 1, foundWords = {CAT = true, DOG = true}, foundOrder = {CAT = 40, DOG = 5}},
-	{userId = 2, foundWords = {CAT = true, DOG = true}, foundOrder = {CAT = 30, DOG = 15}},
-	{userId = 3, foundWords = {CAT = true, DOG = true}, foundOrder = {CAT = 10, DOG = 25}},
-	{userId = 4, foundWords = {CAT = true, DOG = true}, foundOrder = {CAT = 20, DOG = 35}},
+	{userId = 1, foundWords = {["1A"] = true, ["1D"] = true}, foundOrder = {["1A"] = 40, ["1D"] = 5}},
+	{userId = 2, foundWords = {["1A"] = true, ["1D"] = true}, foundOrder = {["1A"] = 30, ["1D"] = 15}},
+	{userId = 3, foundWords = {["1A"] = true, ["1D"] = true}, foundOrder = {["1A"] = 10, ["1D"] = 25}},
+	{userId = 4, foundWords = {["1A"] = true, ["1D"] = true}, foundOrder = {["1A"] = 20, ["1D"] = 35}},
 }
 board:Progress(finishers)
-local catPanel, dogPanel = board.rows.CAT:FindFirstChild("FoundPanel"), board.rows.DOG:FindFirstChild("FoundPanel")
+local catPanel, dogPanel = board.rows["1A"]:FindFirstChild("FoundPanel"), board.rows["1D"]:FindFirstChild("FoundPanel")
 check(catPanel:FindFirstChild("Finder_3").LayoutOrder == 1 and catPanel:FindFirstChild("Finder_4").LayoutOrder == 2 and catPanel:FindFirstChild("Finder_2").LayoutOrder == 3 and not catPanel:FindFirstChild("Finder_1"), "CAT shows its earliest three solvers, even when local player is fourth")
 check(dogPanel:FindFirstChild("Finder_1").LayoutOrder == 1 and dogPanel:FindFirstChild("Finder_2").LayoutOrder == 2 and dogPanel:FindFirstChild("Finder_3").LayoutOrder == 3, "DOG has a different chronological portrait order")
 check(catPanel:FindFirstChild("Exceeds").LayoutOrder == 4 and catPanel:FindFirstChild("Exceeds"):FindFirstChild("TextLabel").Text == "+1", "Overflow follows the first three solvers")
@@ -1656,197 +1508,6 @@ check(shop.Visible and shop.Size == rbx.UDim2.fromScale(0.33, 0.33), "Rebinding 
 
 
 ;(function()
-	local generator = require("../src/shared/puzzle/PuzzleGenerator")
-	local strands = generator.Generate(generator.BuildTutorialDefinition(51), 51)
-	-- Retain a rectangular renderer fixture independently of the square tutorial.
-	strands.gridWidth, strands.letters = 2, {{"C","A"},{"D","T"},{"O","G"}}
-	strands.words, strands.spangram = {"CAT","DOG"}, "DOG"
-	strands.placedWordsByWord.FOX = nil
-	board:Build(strands, "Standard", true)
-	advance(0.6)
-	check(board.adjacent and ui.title.Text == "STRANDS" and ui.subtitle.Text == "Furry friends", "Strands binds its theme clue and generated tile grid")
-	check(board.rows.CAT.Visible and board.rows.DOG.Visible and not ui.wordList:FindFirstChild("StrandsEmpty"), "All target words appear before discovery")
-	check(board.tileFaces[1][1].Parent == board.grid and board.tileFaces[1][1].ZIndex < board.tiles[1][1].ZIndex, "Tile faces cannot cover their letters under sibling Z ordering")
-	check(not board.grid:FindFirstChild("GridRow_1"), "Grid has no word-search ruled paper")
-	local before = #submissions
-	board:Begin(rbx.Vector2.new(150, 60), input)
-	board:Move(rbx.Vector2.new(450, 60))
-	board:Move(rbx.Vector2.new(450, 200))
-	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CAT" and #board.selection == 3, "Selected letters follow a real bent pointer drag")
-	check(#board.lines.Selection:GetChildren() == 2, "Selection draws each bend as its own segment")
-	board:Move(rbx.Vector2.new(450, 60))
-	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CA" and #board.selection == 2, "Pointer backtracking removes one letter and segment")
-	board:Move(rbx.Vector2.new(450, 200))
-	board:Move(rbx.Vector2.new(450, 200))
-	check(#board.selection == 3, "Repeated motion in a tile cannot append it twice")
-	board:Finish()
-	check(#submissions == before + 1 and submissions[#submissions].word == "CAT", "Bent drag submits the complete selected path")
-	board:Progress({{userId=1, foundWords={CAT=true}, hintedWords={}}})
-	check(board.rows.CAT.Visible and board.rows.DOG.Visible and not ui.wordList:FindFirstChild("StrandsEmpty"), "Found and unfound target words both remain in the list")
-	check(board.rows.CAT:FindFirstChild("Word").Text == "CAT", "Discovered words remain readable without a strike-through")
-	check(board.lines.Found_CAT.Visible and #board.lines.Found_CAT:GetChildren() == 2, "Solved bending paths persist")
-	check(board:Begin(rbx.Vector2.new(150,60),input), "Solved tiles remain available for bonus words")
-	board:Cancel()
-	board:Progress({{userId=1, foundWords={CAT=true}, hintedWords={DOG=true}}})
-	local pulse = board.hintPulses.DOG
-	check(board.tileFaces[3][1]:FindFirstChild("WhiteFace").BackgroundColor3 == rbx.Color3.new(1,1,1), "Hint pulse begins white")
-	advance(0.85)
-	local segment = board.lines.Hint_DOG:FindFirstChild("Segment1")
-	check(segment.BackgroundColor3 == rbx.Color3.fromRGB(255,199,55) and board.rows.DOG.Visible, "Hint keeps its target visible and pulses its bent path")
-	board:RefreshLines()
-	check(board.hintPulses.DOG == pulse and segment.BackgroundColor3 == rbx.Color3.fromRGB(255,199,55), "Drag refresh preserves a segmented hint's pulse phase")
-	local hintFace = board.tileFaces[3][1]:FindFirstChild("WhiteFace")
-	check(hintFace.BackgroundColor3 == segment.BackgroundColor3 and segment:FindFirstChild("Core").BackgroundColor3 == segment.BackgroundColor3, "Hint tiles and links reach gold together")
-	local goldTween
-	for _, tween in ipairs(tweenService.created) do if tween.node == hintFace and tween.info.RepeatCount == -1 then goldTween = tween end end
-	check(goldTween and goldTween.info.Reverses and goldTween.info.Time == 0.85, "Hint repeatedly reverses from gold to white until solved")
-	board:Progress({{userId=1, foundWords={CAT=true,DOG=true}}})
-	check(board.completed and not board.hintPulses.DOG, "Final find completes the board and stops hint work")
-	check(board.tileFaces[3][1]:FindFirstChild("WhiteFace").BackgroundColor3 == rbx.Color3.new(1,1,1), "Finding the hinted word restores white tile faces before permanent color")
-	advance(0.13)
-	check(board.tileFaces[3][1]:FindFirstChild("WhiteFace").BackgroundTransparency == 1, "Spangram tiles retain their solved highlight")
-	check(board.wordColors.CAT ~= board.wordColors.DOG, "Each confirmed word has a different color")
-	for _, word in ipairs({"CAT", "DOG"}) do
-		local cell = strands.placedWordsByWord[word].path[1]
-		local gradient = board.tileFaces[cell.row][cell.column]:FindFirstChild("SelectionGradient")
-		for _, point in ipairs(strands.placedWordsByWord[word].path) do
-			check(board.tiles[point.row][point.column].TextColor3 == rbx.Color3.new(1,1,1), "Every solved letter is white on its permanent solution color")
-		end
-		local solvedLink = board.lines["Found_"..word]:FindFirstChild("Segment1")
-		check(solvedLink.BackgroundTransparency == 0 and solvedLink:FindFirstChild("Core").BackgroundColor3 == board.wordColors[word], "Solved connectors and their cores use the opaque solution color instead of white")
-
-		check(board.lines["Found_"..word]:FindFirstChild("Segment1").BackgroundColor3 == board.wordColors[word]
-			and board.rows[word].BackgroundColor3 == board.wordColors[word]
-			and gradient.Color.Keypoints[1].Value == board.wordColors[word]:Lerp(rbx.Color3.new(1,1,1),0.4), "Found tiles, links and row share the word color")
-	end
-	local catColor, dogColor = board.wordColors.CAT, board.wordColors.DOG
-	board:Progress({{userId=1, foundWords={CAT=true,DOG=true}}})
-	check(board.wordColors.CAT == catColor and board.wordColors.DOG == dogColor, "Repeated progress does not recolor found words")
-	board:Build(strands,"Standard",true)
-	advance(0.6)
-	check(not board.completed and next(board.solvedCells)==nil and board.rows.CAT.Visible, "Replay clears solved tiles and shows the fresh target list")
-	check(board.tiles[1][1].TextColor3 ~= rbx.Color3.new(1,1,1), "Fresh unsolved tiles restore dark readable letters")
-	board:Begin(rbx.Vector2.new(150,60), input)
-	board:Move(rbx.Vector2.new(150,335))
-	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CDO" and #board.selection == 3, "Fast pointer movement samples intermediate adjacent tiles")
-	board:Finish()
-	check(countChildren(board.grid,"WrongWordFeedback") == 1, "Wrong bending word uses one synchronized whole-path flash")
-	local feedback = board.grid:FindFirstChild("WrongWordFeedback")
-	check(feedback:FindFirstChild("Segment1") and feedback:FindFirstChild("Segment2"), "Whole-path flash includes every connection")
-	for index,cell in ipairs({{1,1,"C"},{2,1,"D"},{3,1,"O"}}) do
-		local plate,label = feedback:FindFirstChild("WrongTile"..index),feedback:FindFirstChild("WrongLetter"..index)
-		local face = board.tileFaces[cell[1]][cell[2]]
-		check(plate and plate.BackgroundColor3==rbx.Color3.fromRGB(255,63,83) and plate.BackgroundTransparency==0
-			and plate.Position==face.Position and plate.Size==face.Size, "Every attempted tile flashes its full face red in place")
-		check(label.Text==cell[3] and label.TextColor3==rbx.Color3.new(1,1,1) and label.ZIndex>plate.ZIndex
-			and not label.Active and not label.Selectable, "Failed letters stay readable without capturing input")
-	end
-	check(not feedback:FindFirstChild("WrongTile4") and not feedback.Active and not feedback.Selectable, "Only the attempted cells flash and the group is passive")
-	advance(0.41)
-	check(feedback:FindFirstChild("WrongTile1").BackgroundTransparency==1 and feedback:FindFirstChild("WrongLetter1").TextTransparency==1, "Faces and letters fade out together")
-	advance(0.09)
-	check(countChildren(board.grid,"WrongWordFeedback")==0, "Whole-word feedback cleans up")
-	board:ActivateCell({row=1,column=1})
-	board:KeyboardMove(0,1)
-	board:KeyboardMove(1,0)
-	board:ActivateCell({row=2,column=2})
-	check(submissions[#submissions].word == "CAT", "Manual keyboard movement builds the same bending word without changing UI focus")
-	board:Build(strands,"Standard",true)
-	advance(2)
-	check(not board.grid:FindFirstChild("CurrentWord") and not board.grid:FindFirstChild("TileTray"), "Rebuild creates no footer or replacement tray")
-	local diagonal = {
-		rules="Strands", title="Diagonal fixture", words={"CAT"},
-		letters={{"C","X","X"},{"X","A","X"},{"X","X","T"}},
-		placedWordsByWord={CAT={path={{row=1,column=1},{row=2,column=2},{row=3,column=3}}}},
-	}
-	board:Build(diagonal,"Standard",true)
-	board.grid.AbsoluteSize = rbx.Vector2.new(600,600)
-	advance(0.6)
-	check(board.grid.Position == rbx.UDim2.fromScale(0.5,0.5) and board.grid.Size == rbx.UDim2.fromScale(0.98,0.98), "Square grid uses the full authored frame with even margins")
-	local face = board.tileFaces[1][1]
-	local edge = face:FindFirstChildOfClass("UIStroke")
-	check(face.BackgroundColor3 == rbx.Color3.new(1,1,1) and edge.Color == rbx.Color3.new(0,0,0) and edge.Transparency == 0.82, "White tiles have a faint black outline")
-	check(face:FindFirstChild("WhiteFace").BackgroundTransparency == 0 and face:FindFirstChild("SelectionShine"):FindFirstChildOfClass("UIStroke").Transparency == 1, "Idle tiles have no green tint")
-	check(ui.boardPanel:FindFirstChildOfClass("UIAspectRatioConstraint").AspectRatio == 1, "Strands board stays square")
-	check(not board:Begin(rbx.Vector2.new(200,100),input), "Pointer down in the tile gap cannot begin a word")
-	board:Begin(rbx.Vector2.new(100,100),input)
-	board:Move(rbx.Vector2.new(207,195))
-	check(#board.selection == 1, "Off-centre diagonal corner movement ignores the side tile's gap")
-	board:Move(rbx.Vector2.new(300,300))
-	board:Move(rbx.Vector2.new(408,397))
-	board:Move(rbx.Vector2.new(500,500))
-	check(engine.ReadAdjacentWord(board.puzzle.letters, board.selection) == "CAT" and #board.selection == 3, "Diagonal drag crosses two gaps without collecting side neighbours")
-	local link = board.lines.Selection:FindFirstChild("Segment1")
-	check(link.Size.X.Offset < 200 and link:FindFirstChild("Core") ~= nil, "Diagonal link bridges tile edges with a color-matched rounded core instead of crossing letters")
-	advance(0.13)
-	check(face:FindFirstChild("WhiteFace").BackgroundTransparency == 1 and face:FindFirstChild("SelectionShine"):FindFirstChildOfClass("UIStroke").Transparency == 0.15, "Dragging turns connected tiles grey with a light inset rim")
-	board:Finish()
-	check(submissions[#submissions].word == "CAT", "Diagonal gesture still submits its correct canonical word")
-	advance(0.13)
-	check(face:FindFirstChild("WhiteFace").BackgroundTransparency == 0, "Unconfirmed drag highlights clear on release")
-	local countBeforeReverse = #submissions
-	board:Begin(rbx.Vector2.new(500,500),input)
-	board:Move(rbx.Vector2.new(300,300))
-	board:Move(rbx.Vector2.new(100,100))
-	board:Finish()
-	check(#submissions == countBeforeReverse + 1 and submissions[#submissions].word == "CAT" and submissions[#submissions].path[1].row == 3, "Backward drag submits canonical answer with actual reversed path")
-	boardPanel.Name = "BOARDINFO"
-	local rebound = Interface.Bind(hud)
-	check(rebound.boardPanel == boardPanel, "Authored BOARDINFO binds without requiring a replacement BoardPanel")
-	local originalPosition, originalSize = ui.boardPanel.Position, ui.boardPanel.Size
-	board:Build(diagonal,"Standard",true)
-	check(ui.boardPanel.Position == originalPosition and ui.boardPanel.Size == originalSize, "Strands rendering preserves the authored frame geometry")
-	check(board.tileFaces[1][1]:FindFirstChild("BoardRevealScale").Scale == 0 and board.tileShadows[1][1]:FindFirstChild("BoardRevealScale").Scale == 0, "Faces and shadows join the staggered entrance")
-	board.cancelEntrance()
-	check(not board.tileFaces[1][1]:FindFirstChild("BoardRevealScale") and not board.tileShadows[1][1]:FindFirstChild("BoardRevealScale"), "Cancelling entry restores faces and shadows immediately")
-	local effect, effectFace = board.tileFeedback[1][1], board.tileFaces[1][1]
-	effect:Set(true, true)
-	local tweenCount = #tweenService.created
-	effect:Set(true, true)
-	check(#tweenService.created == tweenCount, "Repeated tile updates do not restart highlight or pulse")
-	effect:Set(false, true)
-	effect:Set(true, true)
-	advance(0.13)
-	check(effectFace:FindFirstChild("WhiteFace").BackgroundTransparency == 1, "Rapid backtrack and reselect keep the latest highlight")
-	effect:Set(false, true)
-	board:Build(diagonal,"Standard",true)
-	advance(0.6)
-	check(board.tileFaces[1][1]:FindFirstChild("WhiteFace").BackgroundTransparency == 0, "Rebuild cancels old effects without tinting new tiles")
-	board:Begin(rbx.Vector2.new(100,100),input)
-	board:Move(rbx.Vector2.new(300,300))
-	local freshLink = board.lines.Selection:FindFirstChild("Segment1")
-	check(freshLink:FindFirstChild("LinkReveal") ~= nil, "Fresh selection links animate into place")
-	board:Move(rbx.Vector2.new(100,100))
-	advance(0.4)
-	check(not freshLink.Parent and not effectFace:FindFirstChildOfClass("UIScale"), "Backtracking and rebuild remove temporary effect scales")
-	local bonusPuzzle = {rules="Strands", words={"CAT","DOG","HEN"}, letters={{"C","A","T"},{"D","O","G"},{"H","E","N"}}, placedWordsByWord={}}
-	for row, word in ipairs(bonusPuzzle.words) do
-		bonusPuzzle.placedWordsByWord[word] = {path={{row=row,column=1},{row=row,column=2},{row=row,column=3}}}
-	end
-	board:Build(bonusPuzzle,"Standard",true)
-	advance(0.6)
-	board:Progress({{userId=1,foundWords={CAT=true}}})
-	local catColor = board.wordColors.CAT
-	local beforeBonus = #submissions
-	board:Begin(rbx.Vector2.new(100,100),input)
-	board:Move(rbx.Vector2.new(300,300))
-	board:Move(rbx.Vector2.new(500,100))
-	check(board.selectionColor == rbx.Color3.fromRGB(164,170,179) and board.lines.Selection:FindFirstChild("Segment1").BackgroundColor3 == board.selectionColor, "Selection links use neutral grey even over solved tiles")
-	board:Finish()
-	check(#submissions == beforeBonus+1 and submissions[#submissions].word == "COT", "Non-theme dictionary word submits its actual path without wrong feedback")
-	board:Progress({{userId=1,foundWords={CAT=true},bonusWords={COT=true}}})
-	check(not board.grid:FindFirstChild("BonusXP") and not board.completed and not board.rows.COT, "Extra words show no XP popup and do not add a target row or complete the board")
-	check(board.wordColors.CAT == catColor and not board.solvedCells["2:2"], "Bonus does not change solved colors or claim extra tiles")
-	board:Progress({{userId=1,foundWords={CAT=true},bonusWords={COT=true}}})
-	check(countChildren(board.grid,"BonusXP")==0, "Repeated snapshots never create an XP popup")
-	advance(0.81)
-	check(not board.grid:FindFirstChild("BonusXP"), "Bonus XP feedback cleans itself up")
-end)()
-
-
-
-
-;(function()
  ui.title, ui.subtitle = nil, nil
  board:Build(puzzle, "Standard", true)
  check(board.grid and ui.timed.Visible, "Board builds with optional game headings absent")
@@ -1859,10 +1520,10 @@ end)()
  check(ui.scoreText == scorePanel:FindFirstChild("Score") and ui.scoreLevel == scorePanel:FindFirstChild("Level"):FindFirstChild("Label"), "Score binds the exact authored Score.Score and Score.Level.Label")
  board:Build(puzzle,"Standard",true)
  check(ui.scoreText.Text == "Score: 0" and ui.scoreLevel.Text == "\u{1F451} Level 1", "New board resets the score and crown label")
- board:Progress({{userId=1,foundWords={CAT=true},score=2400},{userId=2,foundWords={DOG=true},score=9999}})
+ board:Progress({{userId=1,foundWords={["1A"]=true},score=2400},{userId=2,foundWords={["1D"]=true},score=9999}})
  local bronze = ui.scoreLevel.TextColor3
  check(ui.scoreText.Text == "Score: 2400" and ui.scoreLevel.Text == "\u{1F451} Level 5", "Only the local server score controls the HUD")
- board:Progress({{userId=1,foundWords={CAT=true},score=2500}})
+ board:Progress({{userId=1,foundWords={["1A"]=true},score=2500}})
  check(ui.scoreLevel.Text == "\u{1F451} Level 6" and ui.scoreLevel.TextColor3 ~= bronze, "Level six changes the crown colour band")
  board:UpdateScore(5000)
  check(ui.scoreLevel.Text == "\u{1F451} Level 11", "Higher score advances the crown level")
@@ -1891,14 +1552,14 @@ end)()
     local signature = table.concat(animation.path,":")
     if signature ~= previous then
      paths += 1 previous = signature seen[signature] = true
-     check(width==3 and #animation.path==3 or width==5 and (#animation.path==5 or #animation.path==6),"Mini uses exactly three tiles; Standard uses five or six")
+     check(width==3 and #animation.path==3 or width==5 and #animation.path==5,"Mini sweeps three cells; Standard sweeps five cells")
      local visited = {}
      for index,cell in ipairs(animation.path) do
       check(cell>=1 and cell<=width*width and not visited[cell],"Preview path uses unique in-bounds cells")
       visited[cell] = true
       if index > 1 then
        local prior = animation.path[index-1]
-       check(math.abs(math.floor((cell-1)/width)-math.floor((prior-1)/width))<=1 and math.abs((cell-1)%width-(prior-1)%width)<=1,"Preview path connects adjacent tiles, including diagonals")
+       check((cell-prior==1 or cell-prior==width) and cell-prior==animation.path[2]-animation.path[1],"Preview is one straight Across/Down entry")
       end
      end
     end
@@ -2035,29 +1696,5 @@ end)()
   board:Build(puzzle,mode)
   check(ui.timed.Visible and ui.timed.Position==rbx.UDim2.new(0.47,8,0.11,-3),"Leaving Duel restores the authored timer position, including offsets, in "..mode)
  end
-end)()
-;(function()
- local generator=require("../src/shared/puzzle/PuzzleGenerator")
- local practice=generator.Generate(generator.BuildTutorialDefinition(1),1)
- board:Build(practice,"Standard",true) advance(1)
- board:Progress({{userId=1,foundWords={CAT=true},hintedWords={DOG=true}}}) advance(0.5)
- local solvedColor=board.wordColors.CAT
- local hintPulse=board.hintPulses.DOG
- board:ActivateCell({row=1,column=1})
- board:MoveToCell({row=2,column=1})
- board:MoveToCell({row=3,column=1})
- board:Finish()
- check(board.grid:FindFirstChild("WrongWordFeedback") and board.found.CAT and board.wordColors.CAT==solvedColor
-  and board.hintPulses.DOG==hintPulse,"Error feedback preserves solved word colors and the existing hint pulse")
- board:ActivateCell({row=1,column=3})
- check(not board.grid:FindFirstChild("WrongWordFeedback") and board.startCell,"Keyboard selection immediately replaces old error feedback")
- advance(0.5)
- check(board.startCell and board.found.CAT and board.hintPulses.DOG==hintPulse,"Cancelled error callbacks cannot disturb the new gesture, solved word or hint")
- board:Cancel()
- board:ActivateCell({row=1,column=1}) board:MoveToCell({row=2,column=1}) board:MoveToCell({row=3,column=1}) board:Finish()
- local oldFeedback=board.grid:FindFirstChild("WrongWordFeedback")
- check(oldFeedback~=nil,"Fixture produces another invalid path")
- board:Build(practice,"Standard",true) advance(1)
- check(not oldFeedback.Parent and not board.grid:FindFirstChild("WrongWordFeedback") and not board.cancelWrongFeedback,"Rebuilding removes the entire flash and invalidates its scheduled animation")
 end)()
 print("BOARD_PRESENTATION_TESTS_PASSED=" .. checks)

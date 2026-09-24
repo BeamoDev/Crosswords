@@ -1,4 +1,4 @@
-require("../src/shared/puzzle/PuzzleTests.spec") -- supplies the existing Lune Random shim
+require("./TestSupport") -- supplies the existing Lune Random shim
 local Queue = require("../src/server/services/QueueState")
 local Config = require("../src/shared/config/ProgressionConfig")
 local n = 0
@@ -28,36 +28,36 @@ local puzzle = {
 	words = { "CAT", "DOG" },
 	letters = { { "C", "A", "T" }, { "D", "O", "G" } },
 	placedWordsByWord = {
-		CAT = { path = { { row = 1, column = 1 }, { row = 1, column = 2 }, { row = 1, column = 3 } } },
-		DOG = { path = { { row = 2, column = 1 }, { row = 2, column = 2 }, { row = 2, column = 3 } } },
+		CAT = { answer="CAT", length=3, path = { { row = 1, column = 1 }, { row = 1, column = 2 }, { row = 1, column = 3 } } },
+		DOG = { answer="DOG", length=3, path = { { row = 2, column = 1 }, { row = 2, column = 2 }, { row = 2, column = 3 } } },
 	},
 }
 local round = Queue.NewRound("one", puzzle, cohort)
-check(round:Snapshot(true).puzzle == puzzle, "Cohort shares one canonical puzzle")
-check(not round:FindWord(3, "CAT", puzzle.placedWordsByWord.CAT.path), "Nonmember cannot find words")
-check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.DOG.path), "Wrong path cannot find word")
+check(round:Snapshot(true).puzzle ~= puzzle and round:Snapshot(true).puzzle.letters[1][1] == " ", "Snapshot hides canonical answers")
+check(not round:FindWord(3, "CAT", puzzle.placedWordsByWord.CAT.answer), "Nonmember cannot find words")
+check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.DOG.answer), "Wrong path cannot find word")
 check(not round:FindWord(1, "BIRD", {}), "Unknown word")
-local accepted, completed = round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.path)
+local accepted, completed = round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.answer)
 check(accepted and not completed, "Valid first word")
 check(round.members[1].score == 300 and round.members[2].score == 0, "Only the finder receives 100 score per canonical letter")
-check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.path), "Duplicate word cannot award XP")
+check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.answer), "Duplicate word cannot award XP")
 check(round.members[2].count == 0, "Solves are independent")
 check(round:NextHint(1) == "DOG", "Hint skips solved words")
 check(round:MarkHint(1, "DOG"), "First hint accepted")
 check(not round:MarkHint(1, "DOG") and round.members[1].hintUses == 1, "Duplicate hint never spends twice")
-accepted, completed = round:FindWord(1, "DOG", puzzle.placedWordsByWord.DOG.path)
+accepted, completed = round:FindWord(1, "DOG", puzzle.placedWordsByWord.DOG.answer)
 check(accepted and completed, "Last word completes once")
 check(round.members[1].score == 450, "Hinted answer earns half score and previous duplicate adds nothing")
-check(not round:FindWord(1, "DOG", puzzle.placedWordsByWord.DOG.path), "Cannot award completion twice")
+check(not round:FindWord(1, "DOG", puzzle.placedWordsByWord.DOG.answer), "Cannot award completion twice")
 check(round:NextHint(1) == nil, "Completed member cannot spend hint")
 local snapshot = round:Snapshot(false)
 check(snapshot.members[1].foundWords.CAT and not snapshot.members[2].foundWords.CAT, "Finder roster is individual")
 snapshot.members[1].foundWords.CAT = nil
 check(round.members[1].foundWords.CAT, "Snapshots cannot mutate authoritative progress")
 check(round:Remove(1) and round.members[2].count == 0, "Leaving does not end others' round")
-check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.path), "Departed players cannot submit")
-accepted = round:FindWord(2, "CAT", { { row = 1, column = 3 }, { row = 1, column = 2 }, { row = 1, column = 1 } })
-check(accepted, "Reverse gesture matches the canonical line")
+check(not round:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.answer), "Departed players cannot submit")
+accepted = round:FindWord(2, "CAT", "cat")
+check(accepted, "Lowercase answers normalize")
 local second = Queue.NewRound("two", puzzle, { c })
 check(second.members[3].count == 0 and second.members[2] == nil, "Later round is isolated")
 local level, xp, needed = Config.Experience.Resolve(0)
@@ -147,14 +147,14 @@ waitingForAvatar:Step(11, avatarLobby, 31)
 check(#avatarLobby.order == 1 and avatarLobby:Snapshot().members[1].thumbnailImage == "verified-headshot", "The ready headshot travels with the newly admitted bot")
 local ordered = Queue.NewRound("ordered", puzzle, {a, b, c})
 ordered:MarkHint(1, "CAT")
-ordered:FindWord(3, "CAT", puzzle.placedWordsByWord.CAT.path)
-ordered:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.path)
-ordered:FindWord(2, "DOG", puzzle.placedWordsByWord.DOG.path)
-ordered:FindWord(3, "DOG", puzzle.placedWordsByWord.DOG.path)
+ordered:FindWord(3, "CAT", puzzle.placedWordsByWord.CAT.answer)
+ordered:FindWord(1, "CAT", puzzle.placedWordsByWord.CAT.answer)
+ordered:FindWord(2, "DOG", puzzle.placedWordsByWord.DOG.answer)
+ordered:FindWord(3, "DOG", puzzle.placedWordsByWord.DOG.answer)
 check(ordered.members[3].foundOrder.CAT < ordered.members[1].foundOrder.CAT, "CAT order reflects accepted solves rather than join order")
 check(ordered.members[2].foundOrder.DOG < ordered.members[3].foundOrder.DOG, "DOG has its own solve ordering")
 local firstOrder = ordered.members[3].foundOrder.CAT
-ordered:FindWord(3, "CAT", puzzle.placedWordsByWord.CAT.path)
+ordered:FindWord(3, "CAT", puzzle.placedWordsByWord.CAT.answer)
 check(ordered.members[3].foundOrder.CAT == firstOrder, "Duplicate find cannot change ordering")
 local copiedOrder = ordered:Snapshot(false).members[3].foundOrder
 copiedOrder.CAT = 999
@@ -204,7 +204,7 @@ local longPuzzle = { words = {}, placedWordsByWord = {} }
 for i = 1, 10 do
 	local word = "WORD" .. tostring(i)
 	table.insert(longPuzzle.words, word)
-	longPuzzle.placedWordsByWord[word] = {path = puzzle.placedWordsByWord.CAT.path}
+	longPuzzle.placedWordsByWord[word] = {answer="CAT", length=3, path = puzzle.placedWordsByWord.CAT.path}
 end
 local wins, losses = 0, 0
 for seed = 1, 60 do
@@ -224,7 +224,7 @@ for seed = 1, 60 do
 	for t = 1, interval * 10 do
 		if t % interval == 0 then
 			local word = longPuzzle.words[t / interval]
-			gameRound:FindWord(1, word, longPuzzle.placedWordsByWord[word].path)
+			gameRound:FindWord(1, word, longPuzzle.placedWordsByWord[word].answer)
 		end
 		local before = gameRound.revision
 		adaptive:Step(6, lobby, t)
@@ -252,11 +252,11 @@ local idleLobby = Queue.new(15)
 for t = 1, 900 do
 	if t <= 90 and t % 30 == 0 then
 		local word = longPuzzle.words[t / 30]
-		stalledRound:FindWord(1, word, longPuzzle.placedWordsByWord[word].path)
+		stalledRound:FindWord(1, word, longPuzzle.placedWordsByWord[word].answer)
 	end
 	if t <= 270 and t % 30 == 0 then
 		local word = longPuzzle.words[t / 30]
-		stalledRound:FindWord(2, word, longPuzzle.placedWordsByWord[word].path)
+		stalledRound:FindWord(2, word, longPuzzle.placedWordsByWord[word].answer)
 	end
 	stalled:Step(2, idleLobby, t)
 end
@@ -293,7 +293,7 @@ end
 do
  local timed = Queue.NewRound("timed", puzzle, {a,b})
  timed:SetTimer(100,180)
- for _, word in ipairs(puzzle.words) do timed:FindWord(a.userId,word,puzzle.placedWordsByWord[word].path) end
+ for _, word in ipairs(puzzle.words) do timed:FindWord(a.userId,word,puzzle.placedWordsByWord[word].answer) end
  check(#timed:Expire(279.99) == 0, "Round stays live before exact deadline")
  local expired = timed:Expire(280)
  check(#expired == 1 and expired[1] == b.userId and timed.members[a.userId].completed and not timed.members[a.userId].failed, "Shared expiry affects unfinished members only")

@@ -13,7 +13,7 @@ local NetworkContract = {
 		MaximumDepth = 4,
 		MaximumEntries = 96,
 		MaximumWordLength = 32,
-		MaximumPathLength = 32,
+		MaximumEntryIdLength = 8,
 		MaximumFunnelStepLength = 96,
 	},
 }
@@ -38,7 +38,8 @@ NetworkContract.Legacy = {
 	-- Request: no arguments; sends both cached categories using the retained event names.
 	LeaderboardUpdate = "LeaderboardUpdateSolves",
 	LeaderboardRequest = "RequestLeaderboardUpdateSolves",
-	-- Match result/forfeit includes theme, wordCount, personal foundCount and xpEarned.
+	-- Word requests send word (entry ID), answer (A-Z text), and roundId / matchId.
+	-- Result/forfeit includes title, wordCount, personal foundCount and xpEarned.
 	-- myXP mirrors earned XP; myPuzzlePieces remains a separate reward.
 	Duel = {
 		Folder = "Duel",

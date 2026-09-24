@@ -13,7 +13,7 @@ end
 function Tutorial:IsActive() return self.active end
 function Tutorial:CanUseBoard()
 	return self.active and not self.pending and not self.view.typing and not self.view.transitioning
-		and (self.step == "FindCat" or self.step == "FindDog" or self.step == "FindFox")
+		and (self.step == "FirstAcross" or self.step == "FirstDown" or self.step == "LastAcross")
 end
 function Tutorial:BlocksPointer(position) return self.view:BlocksPointer(position) end
 
@@ -36,22 +36,6 @@ function Tutorial:Start(snapshot)
 	self:Play()
 end
 
-function Tutorial:WordTarget(word)
-	local path = self.round.puzzle.placedWordsByWord[word].path
-	local minRow, maxRow, minColumn, maxColumn = math.huge, 0, math.huge, 0
-	for _, cell in ipairs(path) do
-		minRow, maxRow = math.min(minRow, cell.row), math.max(maxRow, cell.row)
-		minColumn, maxColumn = math.min(minColumn, cell.column), math.max(maxColumn, cell.column)
-	end
-	local target = self.board.grid:FindFirstChild("TutorialWordTarget") or Instance.new("Frame")
-	target.Name, target.BackgroundTransparency = "TutorialWordTarget", 1
-	target.Active, target.Selectable = false, false
-	target.Position = UDim2.fromScale((minColumn - 1) / self.board.width, (minRow - 1) / self.board.height)
-	target.Size = UDim2.fromScale((maxColumn - minColumn + 1) / self.board.width, (maxRow - minRow + 1) / self.board.height)
-	target.Parent = self.board.grid
-	return target
-end
-
 function Tutorial:Show(step)
 	if not self.active then return end
 	self.step = step
@@ -60,17 +44,17 @@ function Tutorial:Show(step)
 	local title, message, target, autoAdvance, allow = "", "", nil, true, false
 	if step == "Loading" then
 		title, message, autoAdvance = "Loading puzzle...", "Getting your first puzzle ready.", false
-	elseif step == "FindCat" then
-		title, message, target = "Your first word", "Make CAT!", self:WordTarget("CAT")
+	elseif step == "FirstAcross" then
+		title, message, target = "Your first word", "A pet that says meow. Type CAT, then press Check.", ui.boardPanel
 		autoAdvance, allow = false, true
 	elseif step == "TryHint" then
-		title, message, target = "Use a hint", "Tap the bulb for a free clue.", ui.hint
+		title, message, target = "Use a hint", "Tap the bulb to reveal one answer for free.", ui.hint
 		autoAdvance, allow = false, true
-	elseif step == "FindDog" then
-		title, message, target = "Next word", "Make DOG!", self:WordTarget("DOG")
+	elseif step == "FirstDown" then
+		title, message, target = "Next word", "The hint reveals CAR. Shared squares help other clues. Press Check.", ui.boardPanel
 		autoAdvance, allow = false, true
-	elseif step == "FindFox" then
-		title, message, target = "Last word", "Make FOX!", self:WordTarget("FOX")
+	elseif step == "LastAcross" then
+		title, message, target = "Last word", "The colour of a ripe tomato. Type RED, then press Check.", ui.boardPanel
 		autoAdvance, allow = false, true
 	elseif step == "Retry" then
 		title, message = "Time's up!", "Let's try the practice again."
@@ -78,13 +62,12 @@ function Tutorial:Show(step)
 		title, message = "Congrats!", "You found them all!"
 		self.view:Celebrate()
 	elseif step == "HomeCongrats" then
-		title, message = "Tutorial done!", "Have fun finding words!"
+		title, message = "Tutorial done!", "Have fun solving crosswords!"
 	end
 	self.view:Show(title, message, target, autoAdvance, allow,
-		((step == "FindCat" or step == "FindDog" or step == "FindFox") and self.board.grid or nil), false)
-	local word = step == "FindCat" and "CAT" or step == "FindDog" and "DOG" or step == "FindFox" and "FOX"
-	self.view:SetDragGuide(word and self.board.grid, word and self.round.puzzle.placedWordsByWord[word].path, self.board.width, self.board.height,
-		function() return self.pending or self.board.entering or self.board.startCell ~= nil end)
+		((step == "FirstAcross" or step == "FirstDown" or step == "LastAcross") and ui.boardPanel or nil), false)
+	local word = step == "FirstAcross" and "1A" or step == "FirstDown" and "1D" or step == "LastAcross" and "2A"
+	if word then self.board:SelectEntry(word) end
 end
 
 function Tutorial:ApplyTimeout(result)
@@ -160,28 +143,29 @@ function Tutorial:Play()
 	self.board:Build(self.round.puzzle, "Standard", true)
 	self.board.grid.Visible = true
 	self:Progress()
-	self:Show("FindCat")
+	self:Show("FirstAcross")
 end
 
-function Tutorial:Submit(word, path)
+function Tutorial:Submit(word, answer)
 	if not self:CanUseBoard() then return end
-	local expected = self.step == "FindCat" and "CAT" or self.step == "FindDog" and "DOG" or "FOX"
+	local expected = self.step == "FirstAcross" and "1A" or self.step == "FirstDown" and "1D" or "2A"
 	if word ~= expected then
 		self:Show(self.step)
-		return
+		return {success=false}
 	end
 	self.pending = true
 	local generation = self.generation
-	local result = self:Request("Word", { word = word, path = path })
+	local result = self:Request("Word", { word = word, answer = answer })
 	if not self.active or generation ~= self.generation then return end
 	self.pending = false
 	if self:ApplyTimeout(result) then return end
 	if result and result.round then
 		self.round.members = result.round.members
 		self:Progress()
-		if self.board.found[word] then self:Show(word == "CAT" and "TryHint" or word == "DOG" and "FindFox" or "Win") return end
+		if self.board.found[word] then self:Show(word == "1A" and "TryHint" or word == "1D" and "LastAcross" or "Win") return result end
 	end
 	self:Show(self.step)
+    return result
 end
 
 function Tutorial:Hint()
@@ -195,7 +179,7 @@ function Tutorial:Hint()
 	if result and result.round then
 		self.round.members = result.round.members
 		self:Progress()
-		if self.board.hinted.DOG then self:Show("FindDog") return end
+		if self.board.hinted["1D"] then self:Show("FirstDown") return end
 	end
 	self.view:Show("Try again", "Press Hint to try again.", self.ui.hint, false, true)
 end

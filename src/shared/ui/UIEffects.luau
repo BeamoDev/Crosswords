@@ -130,7 +130,7 @@ end
 
 local homePreviews = {}
 
--- Decorative adjacent paths on authored menu tiles; no gameplay or input state.
+-- Decorative Across/Down entries on authored menu tiles; no gameplay or input state.
 function UIEffects.CreateHomeTilePreview(frame, width, color, initialDelay)
 	if not frame then return nil end
 	if homePreviews[frame] then homePreviews[frame]:Destroy() end
@@ -160,27 +160,19 @@ function UIEffects.CreateHomeTilePreview(frame, width, color, initialDelay)
 		controller.path, elapsed, cursor, fading = {}, 0, 0, false
 	end
 	local function nextPath()
-		local length = width == 3 and 3 or (random:NextNumber() < 0.5 and 5 or 6)
-		for _ = 1, 12 do
-			local path, used = {}, {}
-			local current = 1 + math.floor(random:NextNumber() * width * width)
-			for _ = 1, length do
-				table.insert(path, current) used[current] = true
-				local row, column = math.floor((current - 1) / width), (current - 1) % width
-				local choices = {}
-				for dr = -1, 1 do for dc = -1, 1 do
-					local r, c = row + dr, column + dc
-					local index = r * width + c + 1
-					if r >= 0 and r < width and c >= 0 and c < width and not used[index] then table.insert(choices, index) end
-				end end
-				if #path == length or #choices == 0 then break end
-				current = choices[1 + math.floor(random:NextNumber() * #choices)]
-			end
-			local signature = table.concat(path, ":")
-			if #path == length and signature ~= previous then previous = signature return path end
-		end
-		return {}
-	end
+        for _ = 1, 12 do
+            local across = random:NextNumber() < 0.5
+            local lane = math.floor(random:NextNumber() * width)
+            local path = {}
+            for offset = 0, width - 1 do
+                table.insert(path, across and (lane * width + offset + 1) or (offset * width + lane + 1))
+            end
+            local signature = table.concat(path, ":")
+            if signature ~= previous then previous = signature return path end
+        end
+        return {}
+    end
+
 	function controller:Step(dt, available)
 		if stopped then return end
 		local ancestor = frame

@@ -1,60 +1,15 @@
-export type DirectionName = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW"
-
-export type Cell = {
-	row: number,
-	column: number,
-}
-
-export type DirectionVector = { number }
-
+export type Cell = {row: number, column: number}
 export type PuzzleDefinition = {
-	rules: string?,
-	tutorial: boolean?,
-	beginner: boolean?,
-	level: number?,
-	title: string?,
-	subtitle: string?,
-	gridSize: number, -- Row count; square definitions can omit gridWidth.
-	gridWidth: number?,
-	words: { string }?,
-	directions: { DirectionName | DirectionVector }?,
-	seed: number?,
-	mode: string?,
+    rules: string, mode: string, level: number?, seed: number?, beginner: boolean?, tutorial: boolean?,
+    gridSize: number, gridWidth: number, wordCount: number,
 }
-
-export type PlacedWord = {
-	word: string,
-	path: { Cell },
+export type Entry = {
+    id: string, number: number, direction: string, clue: string, length: number, path: {Cell},
+    answer: string?, -- Canonical server entry only. Always absent in public puzzles.
 }
-
-export type GeneratedPuzzle = {
-	rules: string?,
-	clue: string?,
-	theme: string?,
-	spangram: string?,
-	tutorial: boolean?,
-	level: number?,
-	seed: number?,
-	mode: string?,
-	gridSize: number, -- Row count; square definitions can omit gridWidth.
-	gridWidth: number?,
-	letters: { { string } },
-	words: { string },
-	placedWords: { PlacedWord }?,
-	placedWordsByWord: { [string]: PlacedWord }?,
+export type Puzzle = {
+    rules: string, mode: string?, title: string, subtitle: string?, tutorial: boolean?,
+    gridSize: number, gridWidth: number, words: {string}, placedWordsByWord: {[string]: Entry},
+    letters: {{string}}, -- Public: empty string is a block; single space is an open square.
 }
-
-export type BoardState = {
-	mode: string,
-	level: number,
-	seed: number,
-	foundWords: { string },
-	hintedWords: { string },
-	sessionScore: number?,
-	puzzlesCleared: number?,
-	streak: number?,
-	hintUses: number?,
-	startedAtServerTime: number?,
-}
-
 return {}

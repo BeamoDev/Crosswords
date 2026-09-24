@@ -1,6 +1,20 @@
-require("../src/shared/puzzle/PuzzleTests.spec")
+require("./TestSupport")
 local fs, luau = require("@lune/fs"), require("@lune/luau")
-local Generator = require("../src/shared/puzzle/PuzzleGenerator")
+local RealGenerator = require("../src/server/puzzle/PuzzleGenerator")
+local canonical = {}
+local Generator = table.clone(RealGenerator)
+function Generator.generate(definition,seed)
+    local puzzle = RealGenerator.Generate(definition,seed)
+    table.insert(canonical,puzzle)
+    return puzzle
+end
+local function answer(public,id)
+    for index=#canonical,1,-1 do
+        local entry=canonical[index].placedWordsByWord[id]
+        if entry and entry.clue==public.placedWordsByWord[id].clue then return entry.answer end
+    end
+    error("Missing canonical test answer")
+end
 local Config = require("../src/shared/config/ProgressionConfig")
 local Contract = require("../src/shared/network/NetworkContract")
 local now, checks, pending, sent = 100, 0, {}, {}
@@ -38,7 +52,7 @@ local data = {
 }
 local storage = node({shared=node({config=node({ProgressionConfig=Config,GameConfig=require("../src/shared/config/GameConfig")}),
 	utility=node({Utility={GetOrCreate=create}}),network=node({NetworkContract=Contract}),puzzle=node({PuzzleGenerator=Generator,PuzzleValidator=require("../src/shared/puzzle/PuzzleValidator")})})})
-local server = node({data=node({DataService=data}),systems=node({Analytics=setmetatable({}, {__index=function() return function() end end})})})
+local server = node({puzzle={PuzzleGenerator=Generator},data=node({DataService=data}),systems=node({Analytics=setmetatable({}, {__index=function() return function() end end})})})
 local leaderboardSnapshots = {}
 local social = { MarkSnapshotDirty = function(p, snapshot)
 	leaderboardSnapshots[p.UserId] = { words = snapshot.progression.wordsFound, won = snapshot.won }
@@ -148,13 +162,13 @@ advance(9)
 check(duel:SendChallenge(a,2,"Freeplay"), "New invitation after busy rejection")
 check(duel:RespondToChallenge(b,true), "Duel starts without retired generator modes")
 local left,right=last("DuelMatch",a,"countdown"),last("DuelMatch",b,"countdown")
-check(left.mode=="Duel" and right.mode=="Duel" and left.puzzleData==right.puzzleData, "Both Duel players share one supported board")
+check(left.mode=="Duel" and right.mode=="Duel" and left.puzzleData.placedWordsByWord[left.puzzleData.words[1]].clue==right.puzzleData.placedWordsByWord[right.puzzleData.words[1]].clue, "Both Duel players share one supported board")
 check(left.myDuelStats.wins == 3 and left.myDuelStats.losses == 1 and left.opponentDuelStats.wins == 1 and left.opponentDuelStats.losses == 3, "Duel countdown carries actual saved wins and losses")
 check(right.myDuelStats.wins == left.opponentDuelStats.wins and right.opponentDuelStats.wins == left.myDuelStats.wins, "Both HUD recipients get the correct side's record")
 check(a:GetAttribute("DuelBusy") and b:GetAttribute("DuelBusy"), "Duel blocks concurrent solo/queue joins")
 local puzzle=left.puzzleData
 local word=puzzle.words[1]
-duel:ReportProgress(a,{word=word,path=puzzle.placedWordsByWord[word].path})
+duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,answer=answer(puzzle,word)})
 check(profiles[1].xp==0 and profiles[1].progression.wordsFound==0, "Countdown gates XP and word counting")
 advance(6)
 check(last("DuelMatch",a,"start")~=nil, "Existing Duel start delay preserved")
@@ -162,30 +176,39 @@ profiles[2].settings.DuelInvites = false
 duel:OnInviteSettingChanged(b)
 check(b:GetAttribute("DuelBusy") and a:GetAttribute("DuelBusy"), "Opting out does not abandon an active Duel")
 profiles[2].settings.DuelInvites = true
-duel:ReportProgress(a,{word=word,path={}})
+local beforeStale=profiles[1].xp
+duel:ReportProgress(a,{matchId="previous-match",word=word,answer=answer(puzzle,word)})
+check(profiles[1].xp==beforeStale,"An old match packet cannot answer the new crossword")
+check(puzzle.placedWordsByWord[word].answer==nil and puzzle.seed==nil,"Duel countdown omits canonical solution and seed")
+duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,path={}})
 check(profiles[1].xp==0 and profiles[1].progression.wordsFound==0, "Forged Duel path cannot count a word")
 local hint=duel:UseHint(b)
 check(hint.success and profiles[2].hints==0 and profiles[2].progression.wordsFound==0, "Duel hint alone does not count as a find")
+check(hint.boardState.revealedAnswers[word]==answer(puzzle,word),"Duel hint reveals the selected answer to its owner")
 do
 	local originalLetters = puzzle.letters
 	puzzle.letters = {{"C","A","T"},{"D","O","G"}}
 	local bonusPath = {{row=1,column=1},{row=2,column=2},{row=1,column=3}}
-	duel:ReportProgress(a,{word="FAKE",path=bonusPath,xp=99999})
+	duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word="FAKE",path=bonusPath,xp=99999})
 	check(profiles[1].xp==0 and profiles[1].progression.wordsFound==0, "Duel validates extra words without XP or race score")
 	advance(0.2)
-	duel:ReportProgress(a,{word="COT",path={bonusPath[3],bonusPath[2],bonusPath[1]}})
+	duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word="COT",path={bonusPath[3],bonusPath[2],bonusPath[1]}})
 	check(profiles[1].xp==0, "Reversed repeated Duel bonus grants no further XP")
 	puzzle.letters = originalLetters
 	advance(0.2)
 end
 local xp=120
 for _, current in ipairs(puzzle.words) do
-	xp+=#current*20
-	duel:ReportProgress(a,{word=current,path=puzzle.placedWordsByWord[current].path})
-	duel:ReportProgress(a,{word=current,path=puzzle.placedWordsByWord[current].path}) -- Duplicate request.
+	xp+=puzzle.placedWordsByWord[current].length*20
+	duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=current,answer=answer(puzzle,current)})
+	duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=current,answer=answer(puzzle,current)}) -- Duplicate request.
 	advance(0.2)
 end
 check(profiles[1].xp==xp and profiles[2].xp==0, "Duel word and completion XP remain independent")
+check(last("DuelProgress",a).myRevealedAnswers[word]==answer(puzzle,word),"Accepted Duel answers return to their owner")
+local opponentView=last("DuelProgress",b).myRevealedAnswers
+local ownHintCount=0 for _ in pairs(opponentView) do ownHintCount+=1 end
+check(ownHintCount==1,"Opponent receives only their own hint, not winner solutions")
 check(profiles[1].progression.wordsFound==#puzzle.words and profiles[2].progression.wordsFound==0, "Duel word counts ignore duplicates, completion bonuses and the opponent")
 check(last("DuelMatch",a,"result").isWinner and not last("DuelMatch",b,"result").isWinner, "Duel still chooses winner and loser")
 check(profiles[1].mode=="Duel" and profiles[1].won and not profiles[2].won, "Duel outcomes use retained bucket")
@@ -206,11 +229,11 @@ advance(6)
 local nextWord = nextPuzzle.words[1]
 profiles[2].hints = 1
 check(duel:UseHint(b).success, "Partial Duel score fixture hints its first target")
-duel:ReportProgress(b,{word=nextWord,path=nextPuzzle.placedWordsByWord[nextWord].path})
+duel:ReportProgress(b,{matchId=last("DuelMatch",b,"countdown").matchId,word=nextWord,answer=answer(nextPuzzle,nextWord)})
 duel:AbandonMatch(b)
 local quitResult, opponentResult = last("DuelMatch",b,"forfeit"),last("DuelMatch",a,"forfeit")
-check(quitResult.youQuit and not quitResult.isWinner and quitResult.foundCount == 1 and quitResult.xpEarned == #nextWord * 20, "Forfeit loss still reports accepted partial words and XP")
-check(quitResult.score == #nextWord*50 and opponentResult.score == 0, "Hint halves Duel letter score and forfeit preserves it without a completion bonus")
+check(quitResult.youQuit and not quitResult.isWinner and quitResult.foundCount == 1 and quitResult.xpEarned == nextPuzzle.placedWordsByWord[nextWord].length * 20, "Forfeit loss still reports accepted partial words and XP")
+check(quitResult.score == nextPuzzle.placedWordsByWord[nextWord].length*50 and opponentResult.score == 0, "Hint halves Duel letter score and forfeit preserves it without a completion bonus")
 check(opponentResult.isWinner and opponentResult.foundCount == 0 and opponentResult.xpEarned == 0, "Opponent forfeit does not fabricate board completion XP")
 advance(100)
 check(duel:SendChallenge(a,2,"Duel"), "Invite starts before testing cancellation timeout")
@@ -258,7 +281,7 @@ advance(2)
 check(#duel:GetPlayerList(b) == 8, "Full human server shows at most eight real opponents")
 check(a:GetAttribute("DuelBusy") and last("DuelMatch",a,"countdown").matchId == botCountdown.matchId, "Population changes do not remove an active bot opponent")
 for _, current in ipairs(botPuzzle.words) do
-	duel:ReportProgress(a,{word=current,path=botPuzzle.placedWordsByWord[current].path})
+	duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=current,answer=answer(botPuzzle,current)})
 	advance(0.2)
 end
 check(last("DuelMatch",a,"result").isWinner and last("DuelMatch",a,"result").matchId == botCountdown.matchId, "Human can finish and win against the bot")
@@ -276,7 +299,7 @@ initialBotStats = table.clone(botCountdown.opponentDuelStats)
 advance(6)
 for index, current in ipairs(botCountdown.puzzleData.words) do
 	if index == #botCountdown.puzzleData.words then break end
-	duel:ReportProgress(a,{word=current,path=botCountdown.puzzleData.placedWordsByWord[current].path})
+	duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=current,answer=answer(botCountdown.puzzleData,current)})
 	advance(20)
 end
 advance(1200)
@@ -315,7 +338,7 @@ do
  local original = last("DuelMatch",a,"countdown")
  advance(6)
  for _, word in ipairs(original.puzzleData.words) do
-  duel:ReportProgress(a,{word=word,path=original.puzzleData.placedWordsByWord[word].path})
+  duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,answer=answer(original.puzzleData,word)})
   advance(0.2)
  end
  check(last("DuelMatch",a,"result").rematchAvailable, "Completed match advertises rematch")
@@ -333,7 +356,7 @@ do
  advance(6)
  check(last("DuelProgress",a).myProgress == 0, "Rematch resets score")
  for _, word in ipairs(replay.puzzleData.words) do
-  duel:ReportProgress(a,{word=word,path=replay.puzzleData.placedWordsByWord[word].path})
+  duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,answer=answer(replay.puzzleData,word)})
   advance(0.2)
  end
  check(duel:RequestRematch(a,replay.matchId) and duel:RequestRematch(b,replay.matchId), "Another completed match can rematch")
@@ -347,7 +370,7 @@ do
  local botMatch = last("DuelMatch",a,"countdown")
  advance(6)
  for _, word in ipairs(botMatch.puzzleData.words) do
-  duel:ReportProgress(a,{word=word,path=botMatch.puzzleData.placedWordsByWord[word].path})
+  duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,answer=answer(botMatch.puzzleData,word)})
   advance(0.2)
  end
  advance(10)
@@ -382,14 +405,14 @@ do
  local start = last("DuelMatch",a,"start")
  check(start.timeLimit == 180 and start.expiresAt == now+180, "Duel deadline begins after countdown")
  local word = countdown.puzzleData.words[1]
- duel:ReportProgress(a,{word=word,path=countdown.puzzleData.placedWordsByWord[word].path})
+ duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,answer=answer(countdown.puzzleData,word)})
  local xp, wins = profiles[1].xp, profiles[1].progression.duel.wins
  advance(180)
  duel:ReportCompletion(a,{})
  local result = last("DuelMatch",a,"result")
  check(result.matchId == countdown.matchId and result.timedOut and result.isWinner and result.duration == 180, "Highest theme count wins at time expiry")
  check(profiles[1].xp == xp and profiles[1].progression.duel.wins == wins+1, "Partial timed win grants no board-completion XP")
- duel:ReportProgress(a,{word=word,path=countdown.puzzleData.placedWordsByWord[word].path})
+ duel:ReportProgress(a,{matchId=last("DuelMatch",a,"countdown").matchId,word=word,answer=answer(countdown.puzzleData,word)})
  advance(10)
  check(profiles[1].progression.duel.wins == wins+1, "Late requests cannot award a second Duel result")
  check(duel:SendChallenge(a,2,"Duel") and duel:RespondToChallenge(b,true), "Draw fixture starts")

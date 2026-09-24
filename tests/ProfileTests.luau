@@ -1,4 +1,4 @@
-require("../src/shared/puzzle/PuzzleTests.spec")
+require("./TestSupport")
 local fs, luau, serde = require("@lune/fs"), require("@lune/luau"), require("@lune/serde")
 local Config = require("../src/shared/config/ProgressionConfig")
 local GameConfig = require("../src/shared/config/GameConfig")
@@ -395,19 +395,19 @@ meta:renderDailyRewardState()
 check(dailyLabel.Text:find("Daily Streak: 4 days",1,true) and not dailyLabel.Text:find("Best Streak",1,true), "Daily UI uses streak without retired best-streak data")
 check(controller.setupTimedRewards == nil and controller.claimTimedReward == nil, "No timed rewards can be started by the client controller")
 
-local generator = require("../src/shared/puzzle/PuzzleGenerator")
+local generator = require("../src/server/puzzle/PuzzleGenerator")
 local validator = require("../src/shared/puzzle/PuzzleValidator")
-local catalog = require("../src/shared/content/PuzzleCatalog")
-check(#catalog.GetThemes() > 0, "Theme content retained")
+local bank = require("../src/server/content/CrosswordBank")
+check(#bank == 986, "Original crossword vocabulary retained")
 for seed = 1, 40 do
 	local definition = generator.BuildDefinition(5, "Standard", seed * 7919)
 	local puzzle = generator.Generate(definition, seed * 7919)
 	check(#puzzle.words > 0 and #puzzle.letters == puzzle.gridSize, "Standard themed puzzle generated")
 	for _, word in ipairs(puzzle.words) do
 		local placed = puzzle.placedWordsByWord[word]
-		check(placed and #placed.path == #word, "Generated path has the word length")
+		check(placed and #placed.path == placed.length, "Generated path has the word length")
 		for index, cell in ipairs(placed.path) do
-			check(puzzle.letters[cell.row][cell.column] == string.sub(word, index, index), "Generated letters match the expected word path")
+			check(puzzle.letters[cell.row][cell.column] == string.sub(placed.answer, index, index), "Generated letters match the expected word path")
 		end
 	end
 end

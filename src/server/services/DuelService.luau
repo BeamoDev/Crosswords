@@ -18,7 +18,7 @@ local Utility = require(sharedFolder:WaitForChild("utility"):WaitForChild("Utili
 local GameConfig = require(sharedFolder:WaitForChild("config"):WaitForChild("GameConfig"))
 local NetworkContract = require(sharedFolder:WaitForChild("network"):WaitForChild("NetworkContract"))
 local DuelRemotes = NetworkContract.Legacy.Duel
-local PuzzleGenerator = require(sharedFolder:WaitForChild("puzzle"):WaitForChild("PuzzleGenerator"))
+local PuzzleGenerator = require(script.Parent.Parent.puzzle.PuzzleGenerator)
 local PuzzleValidator = require(sharedFolder:WaitForChild("puzzle"):WaitForChild("PuzzleValidator"))
 local PuzzleEconomy = GameConfig.Economy
 
@@ -53,7 +53,6 @@ local playerListRequestedAt = {}
 local playerListCache = {}
 local getOrCreate = Utility.GetOrCreate
 local normalizeWord = PuzzleValidator.NormalizeWord
-local pathsMatch = PuzzleValidator.PathsMatch
 
 local function invitesEnabled(player)
 	if not player or player:GetAttribute("ProfileReady") ~= true then return false end
@@ -195,6 +194,7 @@ local function buildDuelHintBoardState(match, participant)
 		foundWords = serializeWordSet(participant.foundWords, match.boardInfo.words),
 		hintedWords = serializeWordSet(participant.hintedWords, match.boardInfo.words),
 		hintUses = math.max(0, math.floor(tonumber(participant.hintUses) or 0)),
+        revealedAnswers = PuzzleValidator.RevealedAnswers(match.puzzleData, participant.foundWords, participant.hintedWords),
 	}
 end
 
@@ -246,7 +246,7 @@ local function broadcastProgress(match)
 		myScore = match.player1.score,
 		opponentProgress = match.player2.progress,
 		myFoundWords = table.clone(match.player1.foundWords),
-		myBonusWords = table.clone(match.player1.bonusWords or {}),
+		myRevealedAnswers = PuzzleValidator.RevealedAnswers(match.puzzleData, match.player1.foundWords, match.player1.hintedWords),
 		opponentFoundWords = table.clone(match.player2.foundWords),
 	})
 	fireProgressEvent(match.player2.player, {
@@ -255,7 +255,7 @@ local function broadcastProgress(match)
 		myScore = match.player2.score,
 		opponentProgress = match.player1.progress,
 		myFoundWords = table.clone(match.player2.foundWords),
-		myBonusWords = table.clone(match.player2.bonusWords or {}),
+		myRevealedAnswers = PuzzleValidator.RevealedAnswers(match.puzzleData, match.player2.foundWords, match.player2.hintedWords),
 		opponentFoundWords = table.clone(match.player1.foundWords),
 	})
 end
@@ -322,7 +322,7 @@ local function completeMatch(matchId, quitterId)
 			local _, opponent = getParticipant(match, member.userId)
 			fireMatchEvent(member.player, {action="result", matchId=match.id, mode=match.mode, level=match.level,
 				isDraw=true, isWinner=false, timedOut=true, rematchAvailable=true, duration=match.timeLimit,
-				theme=match.puzzleData.title or "Strands", wordCount=match.boardInfo.wordCount,
+				theme=match.puzzleData.title or "Crosswords", wordCount=match.boardInfo.wordCount,
 				foundCount=member.foundCount, score=member.score, xpEarned=member.xpEarned, myXP=member.xpEarned,
 				myPuzzlePieces=0, myStars=0, myDuelStats=participantDuelStats(member), opponentDuelStats=participantDuelStats(opponent)})
 		end
@@ -383,7 +383,7 @@ local function completeMatch(matchId, quitterId)
 		duration = math.floor(duration * 10) / 10,
 		opponentQuit = opponentQuit, timedOut = match.timedOut == true,
 		rematchAvailable = not opponentQuit,
-		theme = match.puzzleData.title or "Strands",
+		theme = match.puzzleData.title or "Crosswords",
 		wordCount = match.boardInfo.wordCount,
 	}
 
@@ -508,7 +508,7 @@ local function startMatch(match)
 			opponentName = opponent.displayName, opponentIsBot = opponent.isBot == true,
 			opponentThumbnailImage = opponent.thumbnailImage,
 			myDuelStats = participantDuelStats(recipient), opponentDuelStats = participantDuelStats(opponent),
-			mode = match.mode, level = match.level, countdownTime = COUNTDOWN_TIME, puzzleData = match.puzzleData, timeLimit = match.timeLimit,
+			mode = match.mode, level = match.level, countdownTime = COUNTDOWN_TIME, puzzleData = PuzzleValidator.PublicPuzzle(match.puzzleData), timeLimit = match.timeLimit,
 		})
 	end
 	task.delay(MATCH_START_DELAY, function()
@@ -856,7 +856,7 @@ function DuelService:ReportProgress(player, payload)
 
 	local matchId = playerMatches[player.UserId]
 	local match = matchId and activeMatches[matchId] or nil
-	if not match or match.state ~= "active" or expireMatch(match) then
+	if not match or payload.matchId ~= match.id or match.state ~= "active" or expireMatch(match) then
 		return
 	end
 
@@ -865,40 +865,26 @@ function DuelService:ReportProgress(player, payload)
 		return
 	end
 	local now = os.clock()
+    if now - (participant.lastAttemptAt or -math.huge) < MIN_DUEL_WORD_FOUND_INTERVAL then return end
+    participant.lastAttemptAt = now
+
 
 	local word = normalizeWord(payload.word)
-	if match.puzzleData.rules == "Strands" and not PuzzleValidator.ValidateStrand(match.puzzleData, payload.path, word) then
-		local bonus = PuzzleValidator.ReadBonusWord(match.puzzleData, payload.path)
-		if activeMatches[match.id] ~= match or match.state ~= "active" or expireMatch(match) or playerMatches[player.UserId] ~= match.id then return end
-		participant.bonusWords = participant.bonusWords or {}
-		if not bonus or participant.foundWords[bonus] or participant.bonusWords[bonus]
-			or now - (participant.lastWordFoundAt or -math.huge) < MIN_DUEL_WORD_FOUND_INTERVAL then return end
-		participant.lastWordFoundAt = now
-		participant.bonusWords[bonus] = true
-		broadcastProgress(match)
-		return
-	end
 	if word and match.boardInfo.wordLookup[word] and not participant.foundWords[word] then
-		local expectedPath = match.puzzleData
-			and match.puzzleData.placedWordsByWord
-			and match.puzzleData.placedWordsByWord[word]
-			and match.puzzleData.placedWordsByWord[word].path
 		if now - (participant.lastWordFoundAt or -math.huge) < MIN_DUEL_WORD_FOUND_INTERVAL then
 			return
 		end
-		local legalPath = match.puzzleData.rules == "Strands"
-			and PuzzleValidator.ValidateStrand(match.puzzleData, payload.path, word)
-			or (match.puzzleData.rules ~= "Strands" and pathsMatch(expectedPath, payload.path))
-		if not legalPath then
-			return
-		end
+        if PuzzleValidator.CheckAnswer(match.puzzleData, word, payload.answer) ~= true then
+            fireProgressEvent(player, {matchId=match.id, rejectedEntry=word})
+            return
+        end
 
 		participant.lastWordFoundAt = now
 		participant.foundWords[word] = true
 		participant.foundCount += 1
-		participant.score += ProgressionConfig.Score.Word(word, participant.hintedWords[word] == true)
+		participant.score += ProgressionConfig.Score.Word(match.puzzleData.placedWordsByWord[word].answer, participant.hintedWords[word] == true)
 		DataService.RecordWordFound(DataService.GetMutableData(player))
-		local earnedXp = #word * ProgressionConfig.Experience.PerLetter
+		local earnedXp = match.puzzleData.placedWordsByWord[word].length * ProgressionConfig.Experience.PerLetter
 		if participant.foundCount == match.boardInfo.wordCount then
 			earnedXp += ProgressionConfig.Experience.CompletionBonus
 			participant.score += ProgressionConfig.Score.Completion(os.clock() - match.startTime, match.timeLimit)

@@ -1,4 +1,4 @@
-require("../src/shared/puzzle/PuzzleTests.spec")
+require("./TestSupport")
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local QueueState = require("../src/server/services/QueueState")
@@ -53,8 +53,8 @@ local expected = {
 	gridSize = 3, words = { "CAT", "DOG" },
 	letters = { { "C", "A", "T" }, { "D", "O", "G" } },
 	placedWordsByWord = {
-		CAT = { path = { { row = 1, column = 1 }, { row = 1, column = 2 }, { row = 1, column = 3 } } },
-		DOG = { path = { { row = 2, column = 1 }, { row = 2, column = 2 }, { row = 2, column = 3 } } },
+		CAT = { answer="CAT", length=3, path = { { row = 1, column = 1 }, { row = 1, column = 2 }, { row = 1, column = 3 } } },
+		DOG = { answer="DOG", length=3, path = { { row = 2, column = 1 }, { row = 2, column = 2 }, { row = 2, column = 3 } } },
 	},
 }
 local failGeneration = false
@@ -81,7 +81,7 @@ local storage = { WaitForChild = function(_, name) assert(name == "shared") retu
 local services = { Players = players, ReplicatedStorage = storage,
 	Workspace = { GetServerTimeNow = function() return now end },
 	HttpService = { GenerateGUID = function() return "round" .. generated end } }
-local parent = { QueueState = QueueState, QueueBots = require("../src/server/services/QueueBots"), SocialService = { MarkSnapshotDirty = function() end }, Parent = { data = { DataService = data } } }
+local parent = { QueueState = QueueState, QueueBots = require("../src/server/services/QueueBots"), SocialService = { MarkSnapshotDirty = function() end }, Parent = { data = { DataService = data }, puzzle={PuzzleGenerator=generator} } }
 local pendingLoop
 local queueService = luau.load(fs.readFile("src/server/services/QueueService.luau"), {
 	debugName = "QueueServiceTest",
@@ -130,29 +130,29 @@ now = deadline
 local late = request(c, { action = "Join" })
 check(generated == 1, "Exactly one generation per cohort")
 check(late.queue.count == 1 and late.queue.members[1].userId == 3, "Late join starts another queue")
-check(#events == 2 and events[1].payload.puzzle == events[2].payload.puzzle, "Same puzzle sent to cohort only")
+check(#events == 2 and events[1].payload.puzzle.words[1] == events[2].payload.puzzle.words[1] and events[1].payload.puzzle.letters[1][1] == " ", "Same puzzle sent to cohort only")
 check(queues[#queues - 1].count == 0, "Home count reset at dispatch")
 local id = events[1].payload.id
-check(not request(c, { action = "Word", roundId = id, word = "CAT", path = expected.placedWordsByWord.CAT.path }).success, "Outsider cannot submit to cohort")
-check(not request(a, { action = "Word", roundId = "other", word = "CAT", path = expected.placedWordsByWord.CAT.path }).success, "Wrong round rejected")
-check(not request(a, { action = "Word", roundId = id, word = "CAT", path = expected.placedWordsByWord.DOG.path,
+check(not request(c, { action = "Word", roundId = id, word = "CAT", answer = "CAT" }).success, "Outsider cannot submit to cohort")
+check(not request(a, { action = "Word", roundId = "other", word = "CAT", answer = "CAT" }).success, "Wrong round rejected")
+check(not request(a, { action = "Word", roundId = id, word = "CAT", answer = "DOG",
 	foundWords = { "CAT", "DOG" }, stars = 3 }).success, "Client claims cannot bypass path validation")
 check(profiles[1].progression.xp == 0 and profiles[1].progression.wordsFound == 0, "Invalid claim awards no XP or word count")
-local first = request(a, { action = "Word", roundId = id, word = "CAT", path = expected.placedWordsByWord.CAT.path })
+local first = request(a, { action = "Word", roundId = id, word = "CAT", answer = "CAT" })
 check(first.success and profiles[1].progression.xp == 60 and profiles[1].progression.wordsFound == 1, "Validated word awards agreed XP and one found word")
-check(not request(a, { action = "Word", roundId = id, word = "CAT", path = expected.placedWordsByWord.CAT.path }).success, "Duplicate word rejected")
+check(not request(a, { action = "Word", roundId = id, word = "CAT", answer = "CAT" }).success, "Duplicate word rejected")
 check(profiles[1].progression.xp == 60 and profiles[2].progression.xp == 0, "Awards isolated and idempotent")
 local hint = request(a, { action = "Hint", roundId = id, word = "CAT" })
 check(hint.success and hint.word == "DOG" and profiles[1].hints == 1, "Server selects and spends hint")
 check(not request(a, { action = "Hint", roundId = id }).success and profiles[1].hints == 1, "No repeated hint spending")
 check(profiles[1].progression.wordsFound == 1 and profiles[2].progression.wordsFound == 0, "Duplicates and hints cannot increase the word count or credit another player")
-check(request(a, { action = "Word", roundId = id, word = "DOG", path = expected.placedWordsByWord.DOG.path }).success, "Completion accepted")
+check(request(a, { action = "Word", roundId = id, word = "DOG", answer = "DOG" }).success, "Completion accepted")
 check(profiles[1].progression.xp == 240 and profiles[1].progression.solves == 11, "Completion XP awarded exactly once")
 local outcomeSnapshot = request(a, { action = "Sync" }).round
 for _, member in ipairs(outcomeSnapshot.members) do
 	check(member.xpEarned == (member.userId == a.UserId and 240 or 0), "Outcome snapshot reports only each member's server-awarded round XP")
 end
-check(not request(a, { action = "Word", roundId = id, word = "DOG", path = expected.placedWordsByWord.DOG.path }).success, "Repeated completion rejected")
+check(not request(a, { action = "Word", roundId = id, word = "DOG", answer = "DOG" }).success, "Repeated completion rejected")
 check(profiles[1].puzzlePieces == 16, "Completion pieces not duplicated")
 check(profiles[1].progression.wordsFound == 2, "Completion and repeated completion add no extra words")
 for _, member in ipairs(request(a, { action = "Sync" }).round.members) do
@@ -200,7 +200,7 @@ now += 1
 for _, mode in ipairs({ "Mini", "Jumbo", "Hardcore" }) do
 	local queueEvents, roundEvents = #queues, #events
 	local started = request(c, { action = "StartSolo", mode = mode })
-	check(started.success and started.round.mode == mode and started.round.puzzle == expected, "Solo starts immediately: " .. mode)
+	check(started.success and started.round.mode == mode and started.round.puzzle.words[1] == expected.words[1], "Solo starts immediately: " .. mode)
 	local soloId = started.round.id
 	check(#started.round.members == 1 and started.round.members[1].userId == 3, "Solo roster contains only the owner")
 	check(#queues == queueEvents and #events == roundEvents and request(c, { action = "Sync" }).queue.count == 0, "Solo start never broadcasts a queue or board to others")
@@ -209,24 +209,24 @@ for _, mode in ipairs({ "Mini", "Jumbo", "Hardcore" }) do
 	now += 1
 	check(request(c, { action = "StartSolo", mode = mode }).round.id == soloId and generated == prior, "Duplicate start keeps active solo board")
 	check(request(c, { action = "Join" }).round.id == soloId and #queues == queueEvents, "Cannot join Standard during solo")
-	check(not request(a, { action = "Word", roundId = soloId, word = "CAT", path = expected.placedWordsByWord.CAT.path }).success, "Other player cannot solve solo board")
+	check(not request(a, { action = "Word", roundId = soloId, word = "CAT", answer = "CAT" }).success, "Other player cannot solve solo board")
 	local startWords = profiles[3].progression.wordsFound
 	local startXp, pieces, losses = profiles[3].progression.xp, profiles[3].puzzlePieces, profiles[3].testLosses or 0
-	local wrong = request(c, { action = "Word", roundId = soloId, word = "", path = invalid })
+	local wrong = request(c, { action = "Word", roundId = soloId, word = "CAT", answer = "BAD" })
 	check(not wrong.success and profiles[3].progression.xp == startXp, "Wrong selection awards no XP")
 	check(profiles[3].progression.wordsFound == startWords, "Invalid solo/Hardcore selection never counts as a word")
 	if mode == "Hardcore" then
 		check(wrong.round.members[1].failed and profiles[3].testLosses == losses + 1, "Hardcore loses exactly once")
-		request(c, { action = "Word", roundId = soloId, word = "", path = invalid })
+		request(c, { action = "Word", roundId = soloId, word = "CAT", answer = "BAD" })
 		check(profiles[3].testLosses == losses + 1 and profiles[3].puzzlePieces == pieces, "Repeated loss does not repeat outcome or completion reward")
-		check(not request(c, { action = "Word", roundId = soloId, word = "CAT", path = expected.placedWordsByWord.CAT.path }).success, "Failed Hardcore cannot continue finding words")
+		check(not request(c, { action = "Word", roundId = soloId, word = "CAT", answer = "CAT" }).success, "Failed Hardcore cannot continue finding words")
 		check(not request(c, { action = "Hint", roundId = soloId }).success, "Failed Hardcore cannot spend hints")
 	else
 		check(not wrong.round.members[1].failed, "Mini/Jumbo allow mistakes")
 		profiles[3].hints = 1
 		check(request(c, { action = "Hint", roundId = soloId }).success and profiles[3].hints == 0, "Solo hint consumes one hint")
-		request(c, { action = "Word", roundId = soloId, word = "CAT", path = expected.placedWordsByWord.CAT.path })
-		local won = request(c, { action = "Word", roundId = soloId, word = "DOG", path = expected.placedWordsByWord.DOG.path })
+		request(c, { action = "Word", roundId = soloId, word = "CAT", answer = "CAT" })
+		local won = request(c, { action = "Word", roundId = soloId, word = "DOG", answer = "DOG" })
 		check(won.success and won.round.members[1].completed and profiles[3].progression.xp == startXp + 240, "Solo completion awards word XP plus completion XP")
 		check(profiles[3].lastOutcome.mode == mode and profiles[3].lastOutcome.won, "Solo outcome belongs to chosen mode")
 		check(profiles[3].progression.wordsFound == startWords + 2, "Each accepted solo word counts, including a hinted word solved afterward")
@@ -267,8 +267,8 @@ for _, member in ipairs(advanced.members) do if member.isBot then solved += memb
 check(solved == 1 and advanced.revision > botRound.revision, "Bots find one canonical word each after their initial delay")
 check(profiles[1].progression.xp == xpBefore and profiles[1].puzzlePieces == piecesBefore, "Simulated finds grant no real XP or pieces")
 check(profiles[1].progression.wordsFound == wordsBeforeBots, "Bot finds never increase a human word counter")
-check(not request(b, {action = "Word", roundId = botRound.id, userId = botRound.members[2].userId, word = "CAT", path = expected.placedWordsByWord.CAT.path}).success, "Client cannot submit as a bot")
-request(a, {action="Word",roundId=botRound.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
+check(not request(b, {action = "Word", roundId = botRound.id, userId = botRound.members[2].userId, word = "CAT", answer = "CAT"}).success, "Client cannot submit as a bot")
+request(a, {action="Word",roundId=botRound.id,word="CAT",answer = "CAT"})
 request(a, {action = "Exit", roundId = botRound.id})
 check(profiles[1].progression.wordsFound == wordsBeforeBots + 1, "Leaving an unfinished round retains accepted words")
 now += 6
@@ -296,13 +296,13 @@ local finalQueue = request(a, {action = "Join"}).queue
 request(b, {action = "Join"})
 now = finalQueue.deadline
 local finalRound = request(a, {action = "Sync"}).round
-request(a, {action = "Word", roundId = finalRound.id, word = "CAT", path = expected.placedWordsByWord.CAT.path})
-request(a, {action = "Word", roundId = finalRound.id, word = "DOG", path = expected.placedWordsByWord.DOG.path})
+request(a, {action = "Word", roundId = finalRound.id, word = "CAT", answer = "CAT"})
+request(a, {action = "Word", roundId = finalRound.id, word = "DOG", answer = "DOG"})
 now += 6
 local whileOtherPlays = request(a, {action = "Sync"})
 check(whileOtherPlays.queue.count == 0 and #whileOtherPlays.round.members == 3, "One human finishing never releases bots while another human is playing")
-request(b, {action = "Word", roundId = finalRound.id, word = "CAT", path = expected.placedWordsByWord.CAT.path})
-request(b, {action = "Word", roundId = finalRound.id, word = "DOG", path = expected.placedWordsByWord.DOG.path})
+request(b, {action = "Word", roundId = finalRound.id, word = "CAT", answer = "CAT"})
+request(b, {action = "Word", roundId = finalRound.id, word = "DOG", answer = "DOG"})
 now += 6
 local afterCompletion = request(a, {action = "Sync"})
 check(afterCompletion.queue.count == 1 and #afterCompletion.round.members == 3, "Finishing releases bots while preserving the completed board's final portraits")
@@ -363,15 +363,15 @@ local function privateRoster(round,owner)
 end
 privateRoster(firstBoard,1)
 privateRoster(secondBoard,2)
-check(not request(b,{action="Word",roundId=firstBoard.id,word="CAT",path=expected.placedWordsByWord.CAT.path}).success,"Another beginner cannot score inside a private round")
-check(not request(c,{action="Word",roundId=firstBoard.id,word="CAT",path=expected.placedWordsByWord.CAT.path}).success,"Public player cannot enter a private round through word requests")
+check(not request(b,{action="Word",roundId=firstBoard.id,word="CAT",answer = "CAT"}).success,"Another beginner cannot score inside a private round")
+check(not request(c,{action="Word",roundId=firstBoard.id,word="CAT",answer = "CAT"}).success,"Public player cannot enter a private round through word requests")
 check(request(a,{action="LeaveQueue"}).round.id==firstBoard.id and a:GetAttribute("RoundBusy"),"Late LeaveQueue cannot discard an already-started private round")
-request(a,{action="Word",roundId=firstBoard.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
+request(a,{action="Word",roundId=firstBoard.id,word="CAT",answer = "CAT"})
 now+=60
 local slowed=request(a,{action="Sync"})
 check(slowed.queue.count==0 and #slowed.round.members==#firstBoard.members,"Active private round neither requeues bots nor removes its portraits")
 for _,member in ipairs(slowed.round.members) do if member.isBot then check(not member.completed,"Beginner companions cannot finish ahead even at the last word") end end
-local privateWin=request(a,{action="Word",roundId=firstBoard.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+local privateWin=request(a,{action="Word",roundId=firstBoard.id,word="DOG",answer = "DOG"})
 check(type(privateWin.round.members[1].duration) == "number" and privateWin.round.members[1].duration >= 0, "Completion carries server-measured round duration")
 check(privateWin.success and profiles[1].progression.solves==1,"Only completing the canonical board advances onboarding")
 now+=180
@@ -402,8 +402,8 @@ local publicBefore=request(c,{action="Sync"}).queue.revision
 now=finalPrivate.deadline
 local tenth=request(a,{action="Sync"}).round
 check(classicCalls[#classicCalls].beginnerSolves==9,"Saved solve count selects the tenth beginner board on re-entry")
-request(a,{action="Word",roundId=tenth.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
-request(a,{action="Word",roundId=tenth.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+request(a,{action="Word",roundId=tenth.id,word="CAT",answer = "CAT"})
+request(a,{action="Word",roundId=tenth.id,word="DOG",answer = "DOG"})
 check(profiles[1].progression.solves==10,"Tenth completion reaches the public admission threshold")
 local privateRevision=request(a,{action="Sync"}).queue.revision
 request(a,{action="Exit",roundId=tenth.id})
@@ -447,23 +447,15 @@ check(solo and solo.solo and solo.mode == "Standard" and #solo.members == 1 and 
 check(solo.puzzle and now < waiting.deadline, "Solo bypasses the remaining queue countdown")
 for _, member in ipairs(request(a,{action="Sync"}).queue.members) do check(member.userId ~= a.UserId, "Solo removes player from waiting roster") end
 do
-	request(a,{action="Exit",roundId=solo.id})
-	expected.rules = "Strands"
-	now += 1.1
-	local bonusRound = request(a,{action="StartSolo",mode="Standard"}).round
-	local xpBefore, foundBefore = profiles[1].progression.xp, profiles[1].progression.wordsFound
-	local path = {{row=1,column=1},{row=2,column=2},{row=1,column=3}} -- COT
-	local extra = request(a,{action="Word",roundId=bonusRound.id,word="FAKE",path=path,xp=99999})
-	check(extra.success and extra.bonusWord=="COT" and extra.snapshot==nil and profiles[1].progression.xp==xpBefore, "Server accepts the real extra word without awarding claimed XP or publishing a profile change")
-	check(extra.round.members[1].score==0 and extra.round.members[1].count==0 and extra.round.members[1].bonusWords.COT and extra.round.members[1].xpEarned==0 and profiles[1].progression.wordsFound==foundBefore, "Extra words do not advance XP, theme score, wins or word leaderboard")
-	check(not request(a,{action="Word",roundId=bonusRound.id,word="COT",path={path[3],path[2],path[1]}}).success and profiles[1].progression.xp==xpBefore, "Backward repeat cannot farm bonus XP")
-	check(not request(a,{action="Word",roundId=bonusRound.id,word="COT",path={{row=1,column=1},{row=1,column=1},{row=1,column=3}}}).success, "Repeated-cell bonus request is rejected")
-	request(a,{action="Word",roundId=bonusRound.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
-	request(a,{action="Word",roundId=bonusRound.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
-	check(profiles[1].progression.xp==xpBefore+120+Config.Experience.CompletionBonus, "Theme completion still awards full normal XP")
-	check(not request(a,{action="Word",roundId=bonusRound.id,word="TAG",path={{row=1,column=3},{row=1,column=2},{row=2,column=3}}}).success, "Completed boards cannot keep generating bonus XP")
-	request(a,{action="Exit",roundId=bonusRound.id})
-	expected.rules = nil
+    request(a,{action="Exit",roundId=solo.id})
+    now += 1.1
+    local testRound=request(a,{action="StartSolo",mode="Standard"}).round
+    local xpBefore=profiles[1].progression.xp
+    local legacy=request(a,{action="Word",roundId=testRound.id,word="CAT",path=expected.placedWordsByWord.CAT.path,xp=99999})
+    check(not legacy.success and profiles[1].progression.xp==xpBefore,"Legacy path and XP claims cannot award a crossword answer")
+    local hint=request(a,{action="Hint",roundId=testRound.id})
+    if hint.success then check(hint.round.members[1].revealedAnswers.CAT=="CAT","Hint response reveals only the selected answer") end
+    request(a,{action="Exit",roundId=testRound.id})
 end
 
 do
@@ -472,10 +464,10 @@ do
   now += 2
   local timed = request(a,{action="StartSolo",mode=mode}).round
   check(timed and timed.timeLimit == duration and timed.expiresAt == now + duration, mode .. " has the configured server deadline")
-  request(a,{action="Word",roundId=timed.id,word="CAT",path=expected.placedWordsByWord.CAT.path})
+  request(a,{action="Word",roundId=timed.id,word="CAT",answer = "CAT"})
   local xp, hints, losses = profiles[1].progression.xp, profiles[1].hints, profiles[1].testLosses or 0
   now = timed.expiresAt - 0.2
-  local late = request(a,{action="Word",roundId=timed.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+  local late = request(a,{action="Word",roundId=timed.id,word="DOG",answer = "DOG"})
   check(not late.success and late.round.members[1].timedOut and late.round.members[1].duration == duration, "Exact deadline rejects the final word and records timeout")
   check(not request(a,{action="Hint",roundId=timed.id}).success and profiles[1].hints == hints, "Expired board never spends hints")
   request(a,{action="Sync"})
@@ -488,13 +480,13 @@ do
  now += 2
  local round = request(a,{action="StartSolo",mode="Standard"}).round
  check(round.members[1].score == 0, "New round starts with zero score")
- request(a,{action="Word",roundId=round.id,word="CAT",path=expected.placedWordsByWord.CAT.path,score=999999})
+ request(a,{action="Word",roundId=round.id,word="CAT",answer = "CAT",score=999999})
  profiles[1].hints = 1
  request(a,{action="Hint",roundId=round.id})
  now = round.expiresAt - 90 - 0.2
- local won = request(a,{action="Word",roundId=round.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+ local won = request(a,{action="Word",roundId=round.id,word="DOG",answer = "DOG"})
  check(won.round.members[1].score == 950 and won.round.members[1].xpEarned == 240, "Round score is 300 unhinted + 150 hinted + 500 half-time completion, independently of XP")
- request(a,{action="Word",roundId=round.id,word="DOG",path=expected.placedWordsByWord.DOG.path})
+ request(a,{action="Word",roundId=round.id,word="DOG",answer = "DOG"})
  now += 300
  check(request(a,{action="Sync"}).round.members[1].score == 950, "Final score freezes and cannot be increased by duplicates or expiry")
  request(a,{action="Exit",roundId=round.id})
